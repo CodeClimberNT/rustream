@@ -1,0 +1,9 @@
+[package]
+name = "multi-platform-screen-casting"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ffmpeg-next = "7.0.2"
+scrap = "0.5.0"
+tokio = "1.38.1"
