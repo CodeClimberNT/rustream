@@ -1,5 +1,4 @@
-![Build Status](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/build.yml/badge.svg)
-![Test Status](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/test.yml/badge.svg)
+![Project CI Status](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/rust.yml/badge.svg?branch=main)
 
 # Multi-platform screen-casting
 PDS project of an application written in rust to host and watch a streaming in rust
