@@ -1,3 +1,5 @@
+![example workflow](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/build.yml/badge.svg)
+![example workflow](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/test.yml/badge.svg)
 # Multi-platform screen-casting
 PDS project of an application written in rust to host and watch a streaming in rust
 
