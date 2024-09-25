@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-scrap = "0.5.0"
+
 image = "0.25.2"
+scrap = "0.5.0"
+

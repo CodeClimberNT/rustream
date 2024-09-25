@@ -1,13 +1,30 @@
-extern crate scrap;
+// extern crate scrap;
 
 use scrap::{Capturer, Display};
 use std::thread;
 use std::time::Duration;
 use image::{ImageBuffer, Rgba};
 
+fn get_monitors() -> Vec<Display> {
+    let monitors: Vec<Display> = Display::all().expect("Couldn't find any display.");
+    monitors
+}
+
+fn set_monitor(mut monitors: Vec<Display>, index: usize) -> Display {
+    monitors.remove(index)
+}
+
 fn capture_screen() {
-    let display: Display = Display::primary().expect("Couldn't find primary display.");
-    let mut capturer: Capturer = Capturer::new(display).expect("Couldn't begin capture.");
+
+    // configurazione recupera monitor del sistema
+    let monitors = get_monitors();
+    for i in 0..monitors.len() {
+        println!("Monitor {}", i);
+    }
+    
+    let monitor = set_monitor(monitors, 0);
+
+    let mut capturer: Capturer = Capturer::new(monitor).expect("Couldn't begin capture.");
     let (width, height) = (capturer.width(), capturer.height());
 
     loop {
