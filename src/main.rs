@@ -4,6 +4,7 @@ mod capture_screen;
 // use capture_screen::capture_screen;
 use app::AppInterface;
 
+
 const APP_TITLE: &str = "Multi-Platform Screen Casting";
 
 fn main() -> Result<(), eframe::Error> {

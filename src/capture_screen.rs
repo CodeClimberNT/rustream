@@ -32,14 +32,15 @@ pub fn set_monitor(index: usize) -> Result<Display, ()> {
     Ok(monitor)
 }
 
-pub fn capture_screen() {
+pub fn capture_screen(index: usize) {
     // configurazione recupera monitor del sistema
     let monitors: Vec<Display> = get_monitors().unwrap();
     for i in 0..monitors.len() {
         println!("Monitor {}", i);
     }
 
-    let monitor: Display = set_monitor(0).unwrap();
+    let monitor: Display = set_monitor(index).unwrap();
+
 
     let mut capturer: Capturer = Capturer::new(monitor).expect("Couldn't begin capture.");
     let (width, height) = (capturer.width(), capturer.height());
