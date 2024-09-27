@@ -1,4 +1,3 @@
-
 use crate::capture_screen::{get_monitors, take_screenshot};
 use egui::{
     Button, CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText, TextureHandle,
@@ -54,12 +53,12 @@ impl AppInterface {
             }
         }
 
-
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
 
         let home_icon_texture = bytes_into_texture(
             cc,
+            // TODO: better way to load the icon and avoid path duplication
             include_bytes!("../assets/icons/home.svg"),
             "../assets/icons/home.svg",
         );
@@ -82,16 +81,34 @@ impl AppInterface {
         self.mode = mode;
     }
 
-    pub fn is_sender_mode(&self) -> bool {
-        self.mode == Mode::Sender
+    pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
+        if ui.button("SENDER").clicked() {
+            self.set_mode(Mode::Sender);
+        }
+
+        if ui.button("RECEIVER").clicked() {
+            self.set_mode(Mode::Receiver);
+        }
     }
 
-    pub fn is_receive_mode(&self) -> bool {
-        self.mode == Mode::Receiver
+    pub fn render_sender_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Select Monitor");
+
+        ComboBox::from_label("Monitor")
+            .selected_text(format!("Monitor {}", self.selected_monitor))
+            .show_ui(ui, |ui| {
+                for (index, monitor) in self.monitors.iter().enumerate() {
+                    ui.selectable_value(&mut self.selected_monitor, index, monitor);
+                }
+            });
+
+        if ui.button("Start Capture").clicked() {
+            take_screenshot(self.selected_monitor);
+        }
     }
 
-    pub fn is_home_page(&self) -> bool {
-        self.mode == Mode::HomePage
+    pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Receiver Mode");
     }
 }
 
@@ -114,30 +131,12 @@ impl eframe::App for AppInterface {
             });
             ui.add_space(20.0);
 
-            if self.is_home_page() {
-                if ui.button("SENDER").clicked() {
-                    self.set_mode(Mode::Sender);
-                }
+            match self.mode {
+                Mode::HomePage => self.render_home_page(ui),
 
-                if ui.button("RECEIVER").clicked() {
-                    self.set_mode(Mode::Receiver);
-                }
-            } else if self.is_sender_mode() {
-                ui.heading("Select Monitor");
+                Mode::Sender => self.render_sender_page(ui),
 
-                ComboBox::from_label("Monitor")
-                    .selected_text(format!("Monitor {}", self.selected_monitor))
-                    .show_ui(ui, |ui| {
-                        for (index, monitor) in self.monitors.iter().enumerate() {
-                            ui.selectable_value(&mut self.selected_monitor, index, monitor);
-                        }
-                    });
-
-                if ui.button("Start Capture").clicked() {
-                    take_screenshot(self.selected_monitor);
-                }
-            } else if self.is_receive_mode() {
-                ui.heading("Receiver Mode");
+                Mode::Receiver => self.render_receiver_mode(ui),
             }
         });
     }
