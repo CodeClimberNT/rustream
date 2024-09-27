@@ -1,11 +1,9 @@
-mod app;
 mod capture_screen;
 
-// use capture_screen::capture_screen;
+mod app;
 use app::AppInterface;
 
-
-const APP_TITLE: &str = "Multi-Platform Screen Casting";
+const APP_TITLE: &str = "RUSTREAM";
 
 fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
