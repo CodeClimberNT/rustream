@@ -1,4 +1,5 @@
 use crate::capture_screen::{get_monitors, take_screenshot};
+use egui::Vec2;
 use egui::{
     Button, CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText, TextureHandle,
     TextureOptions,
@@ -9,12 +10,13 @@ use egui_extras::image::load_svg_bytes;
 pub struct AppInterface {
     selected_monitor: usize,          // Index of the selected monitor
     monitors: Vec<String>,            // List of monitors as strings for display in the menu
-    mode: Mode,                       // Enum to track modes
+    mode: PageView,                   // Enum to track modes
     home_icon: Option<TextureHandle>, // Texture for the home icon
+    address_text: String,             // Text input for the receiver mode
 }
 
 #[derive(Default, Debug, PartialEq)]
-pub enum Mode {
+pub enum PageView {
     #[default]
     HomePage,
     Sender,
@@ -66,28 +68,30 @@ impl AppInterface {
         AppInterface {
             selected_monitor: 0,
             monitors: monitors_list,
-            mode: Mode::default(),
+            mode: PageView::default(),
             home_icon: Some(home_icon_texture),
+            address_text: String::new(),
         }
     }
 
     pub fn reset_ui(&mut self) {
         // Reset the application
         self.selected_monitor = 0;
-        self.mode = Mode::default();
+        self.mode = PageView::default();
+        self.address_text.clear();
     }
 
-    pub fn set_mode(&mut self, mode: Mode) {
+    pub fn set_mode(&mut self, mode: PageView) {
         self.mode = mode;
     }
 
     pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
         if ui.button("SENDER").clicked() {
-            self.set_mode(Mode::Sender);
+            self.set_mode(PageView::Sender);
         }
 
         if ui.button("RECEIVER").clicked() {
-            self.set_mode(Mode::Receiver);
+            self.set_mode(PageView::Receiver);
         }
     }
 
@@ -109,6 +113,16 @@ impl AppInterface {
 
     pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
         ui.heading("Receiver Mode");
+        ui.vertical_centered(|ui| {
+            ui.label("Enter the Sender's IP Address");
+            if ui.text_edit_singleline(&mut self.address_text).lost_focus() {
+                ui.label(format!("Address:{}", self.address_text.clone()));
+                println!("Address: {}", self.address_text);
+            }
+        });
+        if ui.button("Connect").clicked() {
+            ui.label("NOT IMPLEMENTED").highlight();
+        }
     }
 }
 
@@ -117,10 +131,14 @@ impl eframe::App for AppInterface {
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if let Some(home_icon) = &self.home_icon {
-                    if ui.add(Button::image(home_icon)).clicked() {
+                    if ui
+                        .add(Button::image(home_icon).min_size(Vec2::new(30.0, 30.0)))
+                        .clicked()
+                    {
                         self.reset_ui();
                     }
                 }
+
                 ui.vertical_centered(|ui| {
                     ui.label(
                         RichText::new("RUSTREAM")
@@ -129,14 +147,15 @@ impl eframe::App for AppInterface {
                     );
                 });
             });
+            ui.separator();
             ui.add_space(20.0);
 
             match self.mode {
-                Mode::HomePage => self.render_home_page(ui),
+                PageView::HomePage => self.render_home_page(ui),
 
-                Mode::Sender => self.render_sender_page(ui),
+                PageView::Sender => self.render_sender_page(ui),
 
-                Mode::Receiver => self.render_receiver_mode(ui),
+                PageView::Receiver => self.render_receiver_mode(ui),
             }
         });
     }

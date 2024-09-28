@@ -32,7 +32,11 @@ pub fn set_monitor(index: usize) -> Result<Display, ()> {
     Ok(monitor)
 }
 
-pub fn take_screenshot(index: usize) {
+pub fn save_screenshot(image: ImageBuffer<Rgba<u8>, Vec<u8>>, path: &str) {
+    image.save(path).expect("Failed to save image");
+}
+
+pub fn take_screenshot(index: usize) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let monitors: Vec<Display> = get_monitors().unwrap();
     for i in 0..monitors.len() {
         println!("Monitor {}", i);
@@ -54,9 +58,9 @@ pub fn take_screenshot(index: usize) {
                 let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
                     ImageBuffer::<Rgba<u8>, _>::from_raw(width as u32, height as u32, buffer)
                         .unwrap();
-                image.save("screenshot.png").expect("Failed to save image");
                 println!("Captured frame with dimensions {}x{}", width, height);
-                break; // Exit after capturing one frame
+                save_screenshot(image.clone(), "screenshot.png");
+                return image;
             }
             Err(_) => {
                 // Capture failed, retry
