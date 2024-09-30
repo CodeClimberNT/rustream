@@ -1,18 +1,13 @@
 use crate::capture_screen::{get_monitors, take_screenshot};
-use egui::Vec2;
-use egui::{
-    Button, CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText, TextureHandle,
-    TextureOptions,
-};
-use egui_extras::image::load_svg_bytes;
+use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 
 #[derive(Default)]
 pub struct AppInterface {
-    selected_monitor: usize,          // Index of the selected monitor
-    monitors: Vec<String>,            // List of monitors as strings for display in the menu
-    mode: PageView,                   // Enum to track modes
-    home_icon: Option<TextureHandle>, // Texture for the home icon
-    address_text: String,             // Text input for the receiver mode
+    selected_monitor: usize, // Index of the selected monitor
+    monitors: Vec<String>,   // List of monitors as strings for display in the menu
+    mode: PageView,          // Enum to track modes
+    // home_icon_path: &'static str, // Path for the home icon
+    address_text: String, // Text input for the receiver mode
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -21,28 +16,6 @@ pub enum PageView {
     HomePage,
     Sender,
     Receiver,
-}
-
-fn bytes_into_texture(
-    cc: &eframe::CreationContext<'_>,
-    image_bytes: &[u8],
-    path: &str,
-) -> TextureHandle {
-    // let image_bytes: &[u8] = include_bytes!(path);
-    let image: ColorImage = load_svg_bytes(image_bytes).unwrap();
-    let texture: TextureHandle = cc.egui_ctx.load_texture(
-        path,
-        ColorImage::from_rgba_unmultiplied(
-            [image.width() as usize, image.height() as usize],
-            &image
-                .pixels
-                .iter()
-                .flat_map(|&c| c.to_array())
-                .collect::<Vec<_>>(),
-        ),
-        TextureOptions::default(),
-    );
-    texture
 }
 
 impl AppInterface {
@@ -58,18 +31,13 @@ impl AppInterface {
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
 
-        let home_icon_texture = bytes_into_texture(
-            cc,
-            // TODO: better way to load the icon and avoid path duplication
-            include_bytes!("../assets/icons/home.svg"),
-            "../assets/icons/home.svg",
-        );
+        // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
 
         AppInterface {
             selected_monitor: 0,
             monitors: monitors_list,
             mode: PageView::default(),
-            home_icon: Some(home_icon_texture),
+            // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
         }
     }
@@ -130,15 +98,21 @@ impl eframe::App for AppInterface {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if let Some(home_icon) = &self.home_icon {
-                    if ui
-                        .add(Button::image(home_icon).min_size(Vec2::new(30.0, 30.0)))
-                        .clicked()
-                    {
-                        self.reset_ui();
-                    }
+                if ui
+                    .add_sized(
+                        [30., 30.],
+                        egui::ImageButton::new(egui::include_image!(
+                            // TODO: use the home_icon_path variable instead of the hardcoded path
+                            "../assets/icons/home.svg"
+                        )),
+                    )
+                    .clicked()
+                {
+                    self.reset_ui();
                 }
 
+                // ui.image(egui::include_image!("../assets/icons/home.svg"));
+                // ;
                 ui.vertical_centered(|ui| {
                     ui.label(
                         RichText::new("RUSTREAM")

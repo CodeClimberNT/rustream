@@ -9,3 +9,5 @@ egui = "0.29.0"
 egui_extras = { version = "0.29.0", features = ["svg"] }
 image = "0.25.2"
 scrap = "0.5.0"
+
+env_logger = "0.11.5"
