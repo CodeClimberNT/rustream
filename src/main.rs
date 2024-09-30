@@ -7,11 +7,8 @@ mod app;
 use app::AppInterface;
 
 fn main() -> Result<(), eframe::Error> {
-    // init logger for debugging
     env_logger::init();
-
     const APP_TITLE: &str = "RUSTREAM";
-
     // make the options easier to change
     let options: eframe::NativeOptions = eframe::NativeOptions {
         ..Default::default()
@@ -20,9 +17,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         APP_TITLE,
         options,
-        Box::new(|cc: &eframe::CreationContext<'_>| {
-            
-            Ok(Box::new(AppInterface::new(cc)))
-        }),
+        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(AppInterface::new(cc)))),
     )
 }

@@ -1,5 +1,6 @@
 use crate::capture_screen::{get_monitors, take_screenshot};
 use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
+use log::debug;
 
 #[derive(Default)]
 pub struct AppInterface {
@@ -85,7 +86,7 @@ impl AppInterface {
             ui.label("Enter the Sender's IP Address");
             if ui.text_edit_singleline(&mut self.address_text).lost_focus() {
                 ui.label(format!("Address:{}", self.address_text.clone()));
-                println!("Address: {}", self.address_text);
+                debug!("Address: {}", self.address_text);
             }
         });
         if ui.button("Connect").clicked() {

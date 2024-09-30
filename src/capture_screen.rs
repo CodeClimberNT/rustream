@@ -1,4 +1,5 @@
 use image::{ImageBuffer, Rgba};
+use log::debug;
 use scrap::{Capturer, Display};
 use std::thread;
 use std::time::Duration;
@@ -39,7 +40,7 @@ pub fn save_screenshot(image: ImageBuffer<Rgba<u8>, Vec<u8>>, path: &str) {
 pub fn take_screenshot(index: usize) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let monitors: Vec<Display> = get_monitors().unwrap();
     for i in 0..monitors.len() {
-        println!("Monitor {}", i);
+        debug!("Monitor {}", i);
     }
 
     let monitor: Display = set_monitor(index).unwrap();
@@ -58,7 +59,7 @@ pub fn take_screenshot(index: usize) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
                 let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
                     ImageBuffer::<Rgba<u8>, _>::from_raw(width as u32, height as u32, buffer)
                         .unwrap();
-                println!("Captured frame with dimensions {}x{}", width, height);
+                debug!("Captured frame with dimensions {}x{}", width, height);
                 save_screenshot(image.clone(), "screenshot.png");
                 return image;
             }
