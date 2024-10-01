@@ -2165,19 +2165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "multi-platform-screen-casting"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_extras",
- "env_logger",
- "image",
- "log",
- "scrap",
-]
-
-[[package]]
 name = "naga"
 version = "22.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3053,6 +3040,19 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.4.14",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustream"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "env_logger",
+ "image",
+ "log",
+ "scrap",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "multi-platform-screen-casting"
+name = "rustream"
 version = "0.1.0"
 edition = "2021"
 

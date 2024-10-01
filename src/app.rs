@@ -1,9 +1,6 @@
-use crate::capture_screen::{
-    get_monitors, get_primary_monitor, take_screenshot, take_screenshot_from_monitor,
-};
-use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText, emath::Rect, Pos2};
+use crate::capture_screen::{get_monitors, take_screenshot};
+use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 use log::debug;
-use scrap::Display;
 
 // #[derive(Default)]
 pub struct AppInterface {
@@ -12,7 +9,7 @@ pub struct AppInterface {
     mode: PageView,          // Enum to track modes
     // home_icon_path: &'static str, // Path for the home icon
     address_text: String, // Text input for the receiver mode
-    test_monitor: Display,
+    streaming: bool,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -44,7 +41,7 @@ impl AppInterface {
             mode: PageView::default(),
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
-            test_monitor: get_primary_monitor().unwrap(),
+            streaming: false,
         }
     }
 
@@ -60,12 +57,10 @@ impl AppInterface {
     }
 
     pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
-
         ui.horizontal_centered(|ui| {
-            ui.vertical_centered( |ui| {
-
+            ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
-                
+
                 if ui.button("CAST NEW STREAMING").clicked() {
                     self.set_mode(PageView::Sender);
                 }
@@ -80,37 +75,43 @@ impl AppInterface {
     }
 
     pub fn render_sender_page(&mut self, ui: &mut egui::Ui) {
-        
         // TODO: better screen recording method than taking a screenshot
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
-        let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [
-                monitor_feedback.width() as usize,
-                monitor_feedback.height() as usize,
-            ],
-            &monitor_feedback,
-        );
-        
-        let texture =
-            ui.ctx()
-                .load_texture("monitor_feedback", image, egui::TextureOptions::default());
-        
-        //ui.image(&texture);
 
         ui.horizontal_centered(|ui| {
-            ui.vertical_centered( |ui| {
-
+            ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
 
                 if ui.button("Start Capture").clicked() {
-                    take_screenshot(self.selected_monitor);
+                    self.streaming = true;
+                }
+                if ui.button("Stop Capture").clicked() {
+                    self.streaming = false;
+                }
+
+                if self.streaming {
+                    let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [
+                            monitor_feedback.width() as usize,
+                            monitor_feedback.height() as usize,
+                        ],
+                        &monitor_feedback,
+                    );
+
+                    let texture = ui.ctx().load_texture(
+                        "monitor_feedback",
+                        image,
+                        egui::TextureOptions::default(),
+                    );
+                    ui.add(egui::Image::new(&texture).max_height(300.));
+                    // ui.image(&texture);
                 }
             });
         });
         ui.add_space(40.0);
-        
+
         ui.heading("Select Monitor");
 
         ComboBox::from_label("Monitor")
@@ -131,9 +132,9 @@ impl AppInterface {
                 debug!("Address: {}", self.address_text);
             }
         });
-        if ui.button("Connect").clicked() {
-            ui.label("NOT IMPLEMENTED").highlight();
-        }
+        ui.button("Connect")
+            .on_hover_text("NOT IMPLEMENTED")
+            .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
 }
 
@@ -141,24 +142,27 @@ impl eframe::App for AppInterface {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui
-                    .add_sized(
-                        [30., 30.],
-                        egui::ImageButton::new(egui::include_image!(
-                            // TODO: use the home_icon_path variable instead of the hardcoded path
-                            "../assets/icons/home.svg"
-                        )),
-                    )
-                    .clicked()
-                {
-                    self.reset_ui();
-                }
+                ui.vertical(|ui| {
+                    // Home button
 
-                // ui.image(egui::include_image!("../assets/icons/home.svg"));
-                // ;
+                    if ui
+                        .add_sized(
+                            [30., 30.],
+                            egui::ImageButton::new(egui::include_image!(
+                                // TODO: use the home_icon_path variable instead of the hardcoded path
+                                "../assets/icons/home.svg"
+                            )),
+                        )
+                        .on_hover_text("Home")
+                        .clicked()
+                    {
+                        self.reset_ui();
+                    }
+                });
+
                 ui.vertical_centered(|ui| {
                     ui.label(
-                        RichText::new("RUSTREAM")
+                        RichText::new("Welcome to RUSTREAM!")
                             .font(FontId::proportional(40.0))
                             .color(Color32::GOLD),
                     );
