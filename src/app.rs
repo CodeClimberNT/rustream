@@ -1,14 +1,18 @@
-use crate::capture_screen::{get_monitors, take_screenshot};
+use crate::capture_screen::{
+    get_monitors, get_primary_monitor, take_screenshot, take_screenshot_from_monitor,
+};
 use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 use log::debug;
+use scrap::Display;
 
-#[derive(Default)]
+// #[derive(Default)]
 pub struct AppInterface {
     selected_monitor: usize, // Index of the selected monitor
     monitors: Vec<String>,   // List of monitors as strings for display in the menu
     mode: PageView,          // Enum to track modes
     // home_icon_path: &'static str, // Path for the home icon
     address_text: String, // Text input for the receiver mode
+    test_monitor: Display,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -40,6 +44,7 @@ impl AppInterface {
             mode: PageView::default(),
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
+            test_monitor: get_primary_monitor().unwrap(),
         }
     }
 
@@ -74,6 +79,21 @@ impl AppInterface {
                     ui.selectable_value(&mut self.selected_monitor, index, monitor);
                 }
             });
+        // TODO: better screen recording method than taking a screenshot
+        // show the selected monitor as continuous feedback of frames
+        ui.heading("Monitor Feedback");
+        let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [
+                monitor_feedback.width() as usize,
+                monitor_feedback.height() as usize,
+            ],
+            &monitor_feedback,
+        );
+        let texture =
+            ui.ctx()
+                .load_texture("monitor_feedback", image, egui::TextureOptions::default());
+        ui.image(&texture);
 
         if ui.button("Start Capture").clicked() {
             take_screenshot(self.selected_monitor);

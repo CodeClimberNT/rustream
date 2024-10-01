@@ -60,7 +60,34 @@ pub fn take_screenshot(index: usize) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
                     ImageBuffer::<Rgba<u8>, _>::from_raw(width as u32, height as u32, buffer)
                         .unwrap();
                 debug!("Captured frame with dimensions {}x{}", width, height);
-                save_screenshot(image.clone(), "screenshot.png");
+                // save_screenshot(image.clone(), "screenshot.png");
+                return image;
+            }
+            Err(_) => {
+                // Capture failed, retry
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+pub fn take_screenshot_from_monitor(monitor: Display) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let mut capturer: Capturer = Capturer::new(monitor).expect("Couldn't begin capture.");
+    let (width, height) = (capturer.width(), capturer.height());
+
+    loop {
+        match capturer.frame() {
+            Ok(frame) => {
+                let mut buffer: Vec<u8> = frame.iter().cloned().collect();
+                // Convert BGRA to RGBA
+                for chunk in buffer.chunks_exact_mut(4) {
+                    chunk.swap(0, 2); // Swap B and R
+                }
+                let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                    ImageBuffer::<Rgba<u8>, _>::from_raw(width as u32, height as u32, buffer)
+                        .unwrap();
+                debug!("Captured frame with dimensions {}x{}", width, height);
+                // save_screenshot(image.clone(), "screenshot.png");
                 return image;
             }
             Err(_) => {
