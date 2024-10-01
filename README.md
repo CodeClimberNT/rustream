@@ -1,9 +1,10 @@
 ![Project CI Status](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/rust.yml/badge.svg?branch=main)
+# Welcome to RUSTREAM
 
-# Multi-platform screen-casting
+## Multi-platform screen-casting
 PDS project of an application written in rust to host and watch a streaming in rust
 
-## Description
+### Description
 Using the Rust programming language, create a screencasting application capable of continuously
 grabbing the content of the screen (or a portion of it) and stream it to a set of peers.<br><br>
 The application should fulfill the following requirements:
@@ -20,7 +21,7 @@ grabbed content to a custom area.
 pausing/resuming the transmission, for blanking the screen and terminating the current session.
 
 
-## As a bonus, the application may also provide the following features:
+### As a bonus, the application may also provide the following features:
 
 6. [ ] Annotation Tools: When in casting mode, the utility can activate/deactivate a transparent
 layer on top of the grabbed area where annotations like shapes, arrows, text, …, can be
