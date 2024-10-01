@@ -1,7 +1,7 @@
 use crate::capture_screen::{
     get_monitors, get_primary_monitor, take_screenshot, take_screenshot_from_monitor,
 };
-use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
+use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText, emath::Rect, Pos2};
 use log::debug;
 use scrap::Display;
 
@@ -60,25 +60,27 @@ impl AppInterface {
     }
 
     pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
-        if ui.button("SENDER").clicked() {
-            self.set_mode(PageView::Sender);
-        }
 
-        if ui.button("RECEIVER").clicked() {
-            self.set_mode(PageView::Receiver);
-        }
+        ui.horizontal_centered(|ui| {
+            ui.vertical_centered( |ui| {
+
+                ui.add_space(80.0);
+                
+                if ui.button("CAST NEW STREAMING").clicked() {
+                    self.set_mode(PageView::Sender);
+                }
+
+                ui.add_space(30.0);
+
+                if ui.button("VIEW STREAMING").clicked() {
+                    self.set_mode(PageView::Receiver);
+                }
+            });
+        });
     }
 
     pub fn render_sender_page(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Select Monitor");
-
-        ComboBox::from_label("Monitor")
-            .selected_text(format!("Monitor {}", self.selected_monitor))
-            .show_ui(ui, |ui| {
-                for (index, monitor) in self.monitors.iter().enumerate() {
-                    ui.selectable_value(&mut self.selected_monitor, index, monitor);
-                }
-            });
+        
         // TODO: better screen recording method than taking a screenshot
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
@@ -90,14 +92,34 @@ impl AppInterface {
             ],
             &monitor_feedback,
         );
+        
         let texture =
             ui.ctx()
                 .load_texture("monitor_feedback", image, egui::TextureOptions::default());
-        ui.image(&texture);
+        
+        //ui.image(&texture);
 
-        if ui.button("Start Capture").clicked() {
-            take_screenshot(self.selected_monitor);
-        }
+        ui.horizontal_centered(|ui| {
+            ui.vertical_centered( |ui| {
+
+                ui.add_space(40.0);
+
+                if ui.button("Start Capture").clicked() {
+                    take_screenshot(self.selected_monitor);
+                }
+            });
+        });
+        ui.add_space(40.0);
+        
+        ui.heading("Select Monitor");
+
+        ComboBox::from_label("Monitor")
+            .selected_text(format!("Monitor {}", self.selected_monitor))
+            .show_ui(ui, |ui| {
+                for (index, monitor) in self.monitors.iter().enumerate() {
+                    ui.selectable_value(&mut self.selected_monitor, index, monitor);
+                }
+            });
     }
 
     pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
