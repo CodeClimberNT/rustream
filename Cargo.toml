@@ -11,3 +11,9 @@ image = "0.25.2"
 scrap = "0.5.0"
 log = "0.4.22"
 env_logger = "0.11.5"
+
+[profile.release]
+opt-level = 3
+
+[profile.dev]
+opt-level = 2
