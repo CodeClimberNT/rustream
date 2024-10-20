@@ -1,18 +1,19 @@
 use crate::capture_screen::{
-    get_monitors, get_primary_monitor, take_screenshot, take_screenshot_from_monitor,
+    get_monitors, get_primary_monitor, take_screenshot, /*take_screenshot_from_monitor,*/
 };
-use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText, emath::Rect, Pos2};
+use egui::{/*emath::Rect,*/ CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 use log::debug;
-use scrap::Display;
+// use scrap::Display;
 
-// #[derive(Default)]
+#[derive(Default)]
 pub struct AppInterface {
     selected_monitor: usize, // Index of the selected monitor
     monitors: Vec<String>,   // List of monitors as strings for display in the menu
     mode: PageView,          // Enum to track modes
     // home_icon_path: &'static str, // Path for the home icon
     address_text: String, // Text input for the receiver mode
-    test_monitor: Display,
+
+    is_rendering_screenshot: bool,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -35,7 +36,6 @@ impl AppInterface {
 
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
-
         // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
 
         AppInterface {
@@ -44,8 +44,16 @@ impl AppInterface {
             mode: PageView::default(),
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
-            test_monitor: get_primary_monitor().unwrap(),
+            is_rendering_screenshot: false,
         }
+    }
+
+    pub fn width(&self, ctx: &Context) -> f32 {
+        ctx.screen_rect().width()
+    }
+
+    pub fn height(&self, ctx: &Context) -> f32 {
+        ctx.screen_rect().height()
     }
 
     pub fn reset_ui(&mut self) {
@@ -60,12 +68,10 @@ impl AppInterface {
     }
 
     pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
-
         ui.horizontal_centered(|ui| {
-            ui.vertical_centered( |ui| {
-
+            ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
-                
+
                 if ui.button("CAST NEW STREAMING").clicked() {
                     self.set_mode(PageView::Sender);
                 }
@@ -80,37 +86,38 @@ impl AppInterface {
     }
 
     pub fn render_sender_page(&mut self, ui: &mut egui::Ui) {
-        
         // TODO: better screen recording method than taking a screenshot
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
-        let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [
-                monitor_feedback.width() as usize,
-                monitor_feedback.height() as usize,
-            ],
-            &monitor_feedback,
-        );
-        
-        let texture =
-            ui.ctx()
-                .load_texture("monitor_feedback", image, egui::TextureOptions::default());
-        
-        //ui.image(&texture);
 
         ui.horizontal_centered(|ui| {
-            ui.vertical_centered( |ui| {
-
+            ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
 
-                if ui.button("Start Capture").clicked() {
-                    take_screenshot(self.selected_monitor);
+                // Toggle the rendering of the screenshot when the button is clicked
+                self.is_rendering_screenshot ^= ui.button("Start Capture").clicked();
+
+                if self.is_rendering_screenshot {
+                    // take_screenshot(self.selected_monitor);
+                    let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [
+                            monitor_feedback.width() as usize,
+                            monitor_feedback.height() as usize,
+                        ],
+                        &monitor_feedback,
+                    );
+                    let texture = ui.ctx().load_texture(
+                        "monitor_feedback",
+                        image,
+                        egui::TextureOptions::default(),
+                    );
+                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx())/1.5));
                 }
             });
         });
         ui.add_space(40.0);
-        
+
         ui.heading("Select Monitor");
 
         ComboBox::from_label("Monitor")
