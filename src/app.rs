@@ -1,15 +1,17 @@
 use crate::capture_screen::{get_monitors, take_screenshot};
 use egui::{CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 use log::debug;
+// use scrap::Display;
 
-// #[derive(Default)]
+#[derive(Default)]
 pub struct AppInterface {
     selected_monitor: usize, // Index of the selected monitor
     monitors: Vec<String>,   // List of monitors as strings for display in the menu
     mode: PageView,          // Enum to track modes
     // home_icon_path: &'static str, // Path for the home icon
     address_text: String, // Text input for the receiver mode
-    streaming: bool,
+
+    is_rendering_screenshot: bool,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -32,7 +34,6 @@ impl AppInterface {
 
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
-
         // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
 
         AppInterface {
@@ -41,8 +42,16 @@ impl AppInterface {
             mode: PageView::default(),
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
-            streaming: false,
+            is_rendering_screenshot: false,
         }
+    }
+
+    pub fn width(&self, ctx: &Context) -> f32 {
+        ctx.screen_rect().width()
+    }
+
+    pub fn height(&self, ctx: &Context) -> f32 {
+        ctx.screen_rect().height()
     }
 
     pub fn reset_ui(&mut self) {
@@ -83,14 +92,11 @@ impl AppInterface {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
 
-                if ui.button("Start Capture").clicked() {
-                    self.streaming = true;
-                }
-                if ui.button("Stop Capture").clicked() {
-                    self.streaming = false;
-                }
+                // Toggle the rendering of the screenshot when the button is clicked
+                self.is_rendering_screenshot ^= ui.button("Start Capture").clicked();
 
-                if self.streaming {
+                if self.is_rendering_screenshot {
+                    // take_screenshot(self.selected_monitor);
                     let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
                     let image = egui::ColorImage::from_rgba_unmultiplied(
                         [
@@ -99,14 +105,12 @@ impl AppInterface {
                         ],
                         &monitor_feedback,
                     );
-
                     let texture = ui.ctx().load_texture(
                         "monitor_feedback",
                         image,
                         egui::TextureOptions::default(),
                     );
-                    ui.add(egui::Image::new(&texture).max_height(300.));
-                    // ui.image(&texture);
+                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
                 }
             });
         });
@@ -145,21 +149,23 @@ impl eframe::App for AppInterface {
                 ui.vertical(|ui| {
                     // Home button
 
-                    if ui
-                        .add_sized(
-                            [30., 30.],
-                            egui::ImageButton::new(egui::include_image!(
-                                // TODO: use the home_icon_path variable instead of the hardcoded path
-                                "../assets/icons/home.svg"
-                            )),
-                        )
+                if ui
+                    .add_sized(
+                        [30., 30.],
+                        egui::ImageButton::new(egui::include_image!(
+                            // TODO: use the home_icon_path variable instead of the hardcoded path
+                            "../assets/icons/home.svg"
+                        )),
+                    )
                         .on_hover_text("Home")
-                        .clicked()
-                    {
-                        self.reset_ui();
-                    }
+                    .clicked()
+                {
+                    self.reset_ui();
+                }
                 });
 
+                // ui.image(egui::include_image!("../assets/icons/home.svg"));
+                // ;
                 ui.vertical_centered(|ui| {
                     ui.label(
                         RichText::new("Welcome to RUSTREAM!")
