@@ -8,11 +8,14 @@ use app::AppInterface;
 
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
+
     const APP_TITLE: &str = "RUSTREAM";
+    
     // make the options easier to change
     let options: eframe::NativeOptions = eframe::NativeOptions {
         ..Default::default()
     };
+
 
     eframe::run_native(
         APP_TITLE,
