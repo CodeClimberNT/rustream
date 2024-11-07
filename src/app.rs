@@ -1,3 +1,4 @@
+
 use crate::capture_screen::{get_monitors, take_screenshot};
 // Importing all the necessary libraries
 // self -> import the module egui itself
@@ -103,6 +104,7 @@ impl AppInterface {
                     })
                     .clicked();
 
+
                 if self.is_rendering_screenshot {
                     // take_screenshot(self.selected_monitor);
                     let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
@@ -119,6 +121,7 @@ impl AppInterface {
                         egui::TextureOptions::default(),
                     );
                     ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
+
                 }
             });
         });
