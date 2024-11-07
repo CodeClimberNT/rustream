@@ -33,6 +33,7 @@ pub fn set_monitor(index: usize) -> Result<Display, ()> {
     Ok(monitor)
 }
 
+#[allow(dead_code)]
 pub fn save_screenshot(image: ImageBuffer<Rgba<u8>, Vec<u8>>, path: &str) {
     image.save(path).expect("Failed to save image");
 }
@@ -64,13 +65,14 @@ pub fn take_screenshot(index: usize) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
                 return image;
             }
             Err(_) => {
-                // Capture failed, retry
+                eprintln!("Screenshot failed, retrying...");
                 thread::sleep(Duration::from_millis(100));
             }
         }
     }
 }
 
+#[allow(dead_code)]
 pub fn take_screenshot_from_monitor(monitor: Display) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let mut capturer: Capturer = Capturer::new(monitor).expect("Couldn't begin capture.");
     let (width, height) = (capturer.width(), capturer.height());

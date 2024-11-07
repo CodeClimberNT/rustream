@@ -1,7 +1,8 @@
-use crate::capture_screen::{
-    get_monitors, get_primary_monitor, take_screenshot, /*take_screenshot_from_monitor,*/
-};
-use egui::{/*emath::Rect,*/ CentralPanel, Color32, ComboBox, Context, FontId, RichText};
+
+use crate::capture_screen::{get_monitors, take_screenshot};
+// Importing all the necessary libraries
+// self -> import the module egui itself
+use eframe::egui::{self, CentralPanel, Color32, ComboBox, Context, FontId, RichText};
 use log::debug;
 // use scrap::Display;
 
@@ -52,9 +53,9 @@ impl AppInterface {
         ctx.screen_rect().width()
     }
 
-    pub fn height(&self, ctx: &Context) -> f32 {
-        ctx.screen_rect().height()
-    }
+    // pub fn height(&self, ctx: &Context) -> f32 {
+    //     ctx.screen_rect().height()
+    // }
 
     pub fn reset_ui(&mut self) {
         // Reset the application
@@ -94,8 +95,15 @@ impl AppInterface {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
 
-                // Toggle the rendering of the screenshot when the button is clicked
-                self.is_rendering_screenshot ^= ui.button("Start Capture").clicked();
+                // Toggle the rendering of the screenshot when the button is clicked and update the button text
+                self.is_rendering_screenshot ^= ui
+                    .button(if self.is_rendering_screenshot {
+                        "Stop Capture"
+                    } else {
+                        "Start Capture"
+                    })
+                    .clicked();
+
 
                 if self.is_rendering_screenshot {
                     // take_screenshot(self.selected_monitor);
@@ -112,7 +120,8 @@ impl AppInterface {
                         image,
                         egui::TextureOptions::default(),
                     );
-                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx())/1.5));
+                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
+
                 }
             });
         });
@@ -138,9 +147,9 @@ impl AppInterface {
                 debug!("Address: {}", self.address_text);
             }
         });
-        if ui.button("Connect").clicked() {
-            ui.label("NOT IMPLEMENTED").highlight();
-        }
+        ui.button("Connect")
+            .on_hover_text("NOT IMPLEMENTED")
+            .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
 }
 
@@ -148,24 +157,29 @@ impl eframe::App for AppInterface {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui
-                    .add_sized(
-                        [30., 30.],
-                        egui::ImageButton::new(egui::include_image!(
-                            // TODO: use the home_icon_path variable instead of the hardcoded path
-                            "../assets/icons/home.svg"
-                        )),
-                    )
-                    .clicked()
-                {
-                    self.reset_ui();
-                }
+                ui.vertical(|ui| {
+                    // Home button
+
+                    if ui
+                        .add_sized(
+                            [30., 30.],
+                            egui::ImageButton::new(egui::include_image!(
+                                // TODO: use the home_icon_path variable instead of the hardcoded path
+                                "../assets/icons/home.svg"
+                            )),
+                        )
+                        .on_hover_text("Home")
+                        .clicked()
+                    {
+                        self.reset_ui();
+                    }
+                });
 
                 // ui.image(egui::include_image!("../assets/icons/home.svg"));
                 // ;
                 ui.vertical_centered(|ui| {
                     ui.label(
-                        RichText::new("RUSTREAM")
+                        RichText::new("Welcome to RUSTREAM!")
                             .font(FontId::proportional(40.0))
                             .color(Color32::GOLD),
                     );
