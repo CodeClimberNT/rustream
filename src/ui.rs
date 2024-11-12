@@ -59,6 +59,8 @@ impl eframe::App for RustreamApp {
                 for event in &i.events {
                     if let egui::Event::Key {
                         key,
+                        physical_key: _,
+                        repeat: _,
                         pressed: true,
                         modifiers: _,
                     } = event

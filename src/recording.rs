@@ -1,37 +1,46 @@
-use ffmpeg::codec;
-use ffmpeg::format::output;
-use ffmpeg::software::scaling::{context::Context, flag::Flags};
-use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
-use ffmpeg::util::format;
-use ffmpeg::util::media;
-
-// ...existing code...
+use ffmpeg::{
+    codec,
+    format::{self, output},
+    software::scaling::{context::Context, flag::Flags},
+    util::{
+        frame::video::Video,
+        format::Pixel,
+        rational::Rational,
+        log::Level,
+    },
+};
 
 pub struct Recorder {
-    context: ffmpeg::format::context::Output,
-    stream: ffmpeg::format::stream::StreamMut<'static>,
+    context: format::context::Output,
+    stream_index: usize,
+    encoder: codec::encoder::video::Video,
     scaler: Context,
-    frame: Video,
 }
 
 impl Recorder {
     pub fn start_recording(output_path: &str) -> Self {
         ffmpeg::init().unwrap();
+
         let mut context = output(&std::path::Path::new(output_path)).unwrap();
-        let global = context
+        let mut stream = context.add_stream(codec::Id::H264).unwrap();
+        let global_header = context
             .format()
             .flags()
-            .contains(ffmpeg::format::flag::Flags::GLOBAL_HEADER);
+            .contains(format::flag::Flags::GLOBAL_HEADER);
 
-        let mut stream = context.add_stream(codec::Id::H264).unwrap();
-        let encoder = stream.codec_mut().encoder().video().unwrap();
-
-        // Configure encoder settings
-        // ...encoder configuration code...
+        let mut encoder = stream.codec_mut().encoder().video().unwrap();
+        encoder.set_width(1280); // Set appropriate width
+        encoder.set_height(720); // Set appropriate height
+        encoder.set_format(Pixel::YUV420P);
+        encoder.set_time_base(Rational::new(1, 30));
+        if global_header {
+            encoder.set_flags(codec::Flags::GLOBAL_HEADER);
+        }
+        encoder.open_as(codec::Id::H264).unwrap();
 
         let scaler = Context::get(
-            encoder.format(),
+            Pixel::RGBA,
             encoder.width(),
             encoder.height(),
             encoder.format(),
@@ -41,46 +50,48 @@ impl Recorder {
         )
         .unwrap();
 
-        let frame = Video::empty();
-
-        context.set_metadata(ffmpeg::Dictionary::new());
         context.write_header().unwrap();
 
         Self {
             context,
-            stream,
+            stream_index: stream.index(),
+            encoder,
             scaler,
-            frame,
         }
     }
 
     pub fn record_frame(&mut self, data: &[u8], width: u32, height: u32) {
-        // Create a frame from raw data
-        let mut frame = Video::empty();
-        frame.set_format(format::Pixel::RGBA);
-        frame.set_width(width as i32);
-        frame.set_height(height as i32);
-        frame.fill_with(data);
+        let mut input = Video::empty();
+        input.set_width(width as i32);
+        input.set_height(height as i32);
+        input.set_format(Pixel::RGBA);
+        input.plane_mut(0).unwrap().copy_from_slice(data);
 
-        // Scale frame if necessary
-        let mut scaled_frame = Video::empty();
-        scaled_frame.set_format(self.stream.codec().format());
-        scaled_frame.set_width(self.stream.codec().width());
-        scaled_frame.set_height(self.stream.codec().height());
-        self.scaler.run(&frame, &mut scaled_frame).unwrap();
+        let mut output = Video::empty();
+        output.set_width(self.encoder.width());
+        output.set_height(self.encoder.height());
+        output.set_format(self.encoder.format());
 
-        // Encode the frame
-        let mut packet = ffmpeg::Packet::empty();
-        let encoder = self.stream.codec_mut().encoder();
-        if encoder.send_frame(&scaled_frame).is_ok() {
-            while encoder.receive_packet(&mut packet).is_ok() {
-                packet.set_stream_index(self.stream.index());
-                self.context.write_packet(&packet).unwrap();
-            }
+        self.scaler.run(&input, &mut output).unwrap();
+
+        self.encoder.send_frame(&output).unwrap();
+
+        let mut packet = ffmpeg::util::packet::Packet::empty();
+        while self.encoder.receive_packet(&mut packet).is_ok() {
+            packet.set_stream_index(self.stream_index);
+            self.context.write_packet(&mut packet).unwrap();
         }
     }
 
     pub fn stop_recording(&mut self) {
+        self.encoder.send_eof().unwrap();
+
+        let mut packet = ffmpeg::util::packet::Packet::empty();
+        while self.encoder.receive_packet(&mut packet).is_ok() {
+            packet.set_stream_index(self.stream_index);
+            self.context.write_packet(&mut packet).unwrap();
+        }
+
         self.context.write_trailer().unwrap();
     }
 }
@@ -92,5 +103,3 @@ pub fn start_recording(output_path: &str) -> Recorder {
 pub fn stop_recording(recorder: &mut Recorder) {
     recorder.stop_recording();
 }
-
-// ...existing code...
