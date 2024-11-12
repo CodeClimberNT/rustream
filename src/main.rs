@@ -1,25 +1,25 @@
 // https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-mod capture_screen;
+use env_logger;
+use log::info;
+use std::sync::Arc;
 
-mod app;
-use app::AppInterface;
+mod annotations;
+mod capture;
+mod hotkeys;
+mod multimonitor;
+mod network;
+mod recording;
+mod ui;
 
-fn main() -> Result<(), eframe::Error> {
+use annotations::AnnotationState;
+use hotkeys::{initialize_hotkeys, HotkeyConfig};
+
+fn main() {
+    // Initialize the logger
     env_logger::init();
 
-    const APP_TITLE: &str = "RUSTREAM";
-    
-    // make the options easier to change
-    let options: eframe::NativeOptions = eframe::NativeOptions {
-        ..Default::default()
-    };
-
-
-    eframe::run_native(
-        APP_TITLE,
-        options,
-        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(AppInterface::new(cc)))),
-    )
+    // Start the UI
+    ui::initialize_ui();
 }
