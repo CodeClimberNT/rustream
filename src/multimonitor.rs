@@ -2,7 +2,6 @@ use scrap::Display;
 
 #[derive(Clone)]
 pub struct MonitorInfo {
-    pub id: usize,
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -12,7 +11,7 @@ pub fn list_monitors() -> Vec<MonitorInfo> {
     let displays = match Display::all() {
         Ok(displays) => displays,
         Err(e) => {
-            eprintln!("Could not get displays: {}", e);
+            eprintln!("Failed to get displays: {}", e);
             return Vec::new();
         }
     };
@@ -21,27 +20,28 @@ pub fn list_monitors() -> Vec<MonitorInfo> {
         .iter()
         .enumerate()
         .map(|(i, display)| MonitorInfo {
-            id: i,
-            name: format!("Monitor {}", i + 1),
+            name: format!("Display {}", i + 1),
             width: display.width() as u32,
             height: display.height() as u32,
-            // refresh_rate: display.refresh_rate(),
         })
         .collect()
 }
 
-pub fn select_monitor(monitor_id: usize) -> MonitorInfo {
-    list_monitors()
-        .into_iter()
-        .find(|m| m.id == monitor_id)
-        .unwrap_or_else(|| {
-            eprintln!(
-                "Monitor with ID {} not found. Selecting primary monitor.",
-                monitor_id
-            );
-            list_monitors()
-                .first()
-                .cloned()
-                .expect("No monitors available.")
-        })
+pub fn select_monitor(index: usize) -> MonitorInfo {
+    let displays = Display::all().unwrap();
+    if let Some(display) = displays.get(index) {
+        MonitorInfo {
+            name: format!("Display {}", index + 1),
+            width: display.width() as u32,
+            height: display.height() as u32,
+        }
+    } else {
+        // Fallback to primary display
+        let primary = Display::primary().unwrap();
+        MonitorInfo {
+            name: "Primary Display".to_string(),
+            width: primary.width() as u32,
+            height: primary.height() as u32,
+        }
+    }
 }

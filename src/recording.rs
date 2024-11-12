@@ -14,7 +14,7 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn start_recording(output_path: &str) -> Self {
+    pub fn start_recording(output_path: &str, width: u32, height: u32) -> Self {
         ffmpeg::init().expect("Failed to initialize FFmpeg.");
 
         let mut context = output(&std::path::Path::new(output_path)).unwrap();
@@ -31,8 +31,8 @@ impl Recorder {
             .encoder()
             .video()
             .unwrap();
-        encoder.set_width(1280); // Set appropriate width
-        encoder.set_height(720); // Set appropriate height
+        encoder.set_width(width);
+        encoder.set_height(height);
         encoder.set_format(Pixel::YUV420P);
         encoder.set_time_base((1, 30));
         if global_header {
@@ -61,8 +61,8 @@ impl Recorder {
 
     pub fn record_frame(&mut self, data: &[u8], width: u32, height: u32) {
         let mut input = Video::empty();
-        input.set_width(width as u32);
-        input.set_height(height as u32);
+        input.set_width(width);
+        input.set_height(height);
         input.set_format(Pixel::RGBA);
         input
             .plane_mut::<[u8; 4]>(0)
@@ -105,8 +105,8 @@ impl Recorder {
     }
 }
 
-pub fn start_recording(output_path: &str) -> Recorder {
-    Recorder::start_recording(output_path)
+pub fn start_recording(output_path: &str, width: u32, height: u32) -> Recorder {
+    Recorder::start_recording(output_path, width, height)
 }
 
 pub fn stop_recording(recorder: &mut Recorder) {

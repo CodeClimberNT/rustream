@@ -3,9 +3,26 @@ use eframe::egui;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::Mutex;
+use winit::keyboard::KeyCode;
+use winit::platform::windows::EventLoopBuilderExtWindows as _;
+
+fn key_to_keycode(key: egui::Key) -> KeyCode {
+    match key {
+        egui::Key::Space => KeyCode::Space,
+        egui::Key::Enter => KeyCode::Enter,
+        egui::Key::Escape => KeyCode::Escape,
+        _ => KeyCode::Space, // Default mapping, expand as needed
+    }
+}
 
 pub fn initialize_ui() {
-    let options: eframe::NativeOptions = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        event_loop_builder: Some(Box::new(|builder| {
+            builder.with_any_thread(true);
+        })),
+        ..Default::default()
+    };
+
     _ = eframe::run_native(
         "Rustream",
         options,
@@ -26,6 +43,10 @@ struct RustreamApp {
     selecting_area: bool,
     area_selection_start: Option<egui::Pos2>,
     area_selection_current: Option<egui::Pos2>,
+    selecting_screen_area_active: bool,
+    monitor_selection_window_open: bool,
+    hotkey_config_window_open: bool,
+    annotation_window_open: bool,
 }
 
 enum AppMode {
@@ -48,30 +69,46 @@ impl Default for RustreamApp {
             selecting_area: false,
             area_selection_start: None,
             area_selection_current: None,
+            selecting_screen_area_active: false,
+            monitor_selection_window_open: false,
+            hotkey_config_window_open: false,
+            annotation_window_open: false,
         }
     }
 }
 
 impl eframe::App for RustreamApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle global hotkeys through egui events
+        ctx.input(|i| {
+            for event in &i.events {
+                if let egui::Event::Key {
+                    key, pressed: true, ..
+                } = event
+                {
+                    let keycode = key_to_keycode(*key);
+                    hotkeys::handle_key(keycode, &self.hotkey_config);
+                }
+            }
+        });
+
         // Handle hotkey configuration
         if let Some(hotkey_name) = self.configuring_hotkey {
             ctx.input(|i| {
                 for event in &i.events {
                     if let egui::Event::Key {
-                        key,
-                        physical_key: _,
-                        repeat: _,
-                        pressed: true,
-                        modifiers: _,
+                        key, pressed: true, ..
                     } = event
                     {
+                        let mut new_config = (*self.hotkey_config).clone();
+
                         match hotkey_name {
-                            // "pause" => self.hotkey_config.pause = key.code,
-                            // "blank" => self.hotkey_config.blank = key.code,
-                            // "terminate" => self.hotkey_config.terminate = key.code,
+                            "pause" => new_config.pause = key_to_keycode(*key),
+                            "blank" => new_config.blank = key_to_keycode(*key),
+                            "terminate" => new_config.terminate = key_to_keycode(*key),
                             _ => {}
                         }
+                        self.hotkey_config = Arc::new(new_config);
                         self.configuring_hotkey = None;
                         break;
                     }
@@ -153,34 +190,49 @@ impl RustreamApp {
     fn caster_ui(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Caster Mode");
+
             // Monitor Selection
             ui.label("Select Monitor:");
             if ui.button("Choose Monitor").clicked() {
-                self.selected_monitor = self.choose_monitor(ui);
+                self.monitor_selection_window_open = true;
             }
+            if self.monitor_selection_window_open {
+                self.show_monitor_selection_window(ctx);
+            }
+
             // Custom Area Selection
             if ui.button("Select Screen Area").clicked() {
-                self.custom_area = self.select_screen_area(ui);
+                self.selecting_screen_area_active = true;
             }
+            if self.selecting_screen_area_active {
+                self.handle_screen_area_selection(ctx);
+            }
+
             // Start Streaming
             if ui.button("Start Streaming").clicked() {
                 self.start_streaming();
             }
-            // Annotation Tools
-            if ui.button("Toggle Annotations").clicked() {
-                let mut state = futures::executor::block_on(self.annotation_state.lock());
-                let active = !state.active;
-                annotations::toggle_annotations(&mut state, active);
-            }
+
             // Hotkey Configuration
             if ui.button("Configure Hotkeys").clicked() {
-                self.configure_hotkeys(ui);
+                self.hotkey_config_window_open = true;
             }
-            // Draw Annotations
-            annotations::draw_annotations(
-                ui,
-                &mut futures::executor::block_on(self.annotation_state.lock()),
-            );
+            if self.hotkey_config_window_open {
+                self.show_hotkey_config_window(ctx);
+            }
+
+            // Annotation Tools
+            if ui.button("Toggle Annotations").clicked() {
+                self.annotation_window_open = !self.annotation_window_open;
+                let mut state = futures::executor::block_on(self.annotation_state.lock());
+                annotations::toggle_annotations(&mut state, self.annotation_window_open);
+            }
+            if self.annotation_window_open {
+                annotations::draw_annotations(
+                    ui,
+                    &mut futures::executor::block_on(self.annotation_state.lock()),
+                );
+            }
         });
     }
 
@@ -206,17 +258,18 @@ impl RustreamApp {
         });
     }
 
-    fn choose_monitor(&mut self, ui: &mut egui::Ui) -> Option<multimonitor::MonitorInfo> {
+    fn choose_monitor(ui: &mut egui::Ui) -> Option<multimonitor::MonitorInfo> {
         // Provide UI for selecting a monitor from the list
         let monitors = multimonitor::list_monitors();
+        let mut selected = None;
         egui::Window::new("Select Monitor").show(ui.ctx(), |ui| {
             for monitor in monitors {
                 if ui.button(&monitor.name).clicked() {
-                    self.selected_monitor = Some(monitor.clone());
+                    selected = Some(monitor.clone());
                 }
             }
         });
-        self.selected_monitor.clone()
+        selected
     }
 
     fn select_screen_area(&mut self, ui: &mut egui::Ui) -> Option<capture::ScreenArea> {
@@ -258,7 +311,23 @@ impl RustreamApp {
     }
 
     fn start_recording(&mut self) {
-        self.recording_state = Some(recording::Recorder::start_recording("output.mp4"));
+        let width;
+        let height;
+        if let Some(ref area) = self.custom_area {
+            width = area.width;
+            height = area.height;
+        } else if let Some(ref monitor) = self.selected_monitor {
+            width = monitor.width;
+            height = monitor.height;
+        } else {
+            width = 1280; // fallback
+            height = 720;
+        }
+        self.recording_state = Some(recording::Recorder::start_recording(
+            "output.mp4",
+            width,
+            height,
+        ));
     }
 
     fn stop_recording(&mut self) {
@@ -296,5 +365,40 @@ impl RustreamApp {
                 }
             });
         });
+    }
+    fn show_monitor_selection_window(&mut self, ctx: &egui::Context) {
+        egui::Window::new("Select Monitor")
+            .open(&mut self.monitor_selection_window_open)
+            .show(ctx, |ui| {
+                if let Some(monitor) = Self::choose_monitor(ui) {
+                    self.selected_monitor = Some(monitor);
+                }
+            });
+    }
+    fn handle_screen_area_selection(&mut self, ctx: &egui::Context) {
+        let mut is_open = self.selecting_screen_area_active;
+        egui::Window::new("Screen Area Selection")
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                self.custom_area = self.select_screen_area(ui);
+                if ui.button("Done").clicked() {
+                    self.selecting_screen_area_active = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.selecting_screen_area_active = false;
+                    self.custom_area = None;
+                }
+            });
+        self.selecting_screen_area_active = is_open;
+    }
+
+    fn show_hotkey_config_window(&mut self, ctx: &egui::Context) {
+        let mut is_open = self.hotkey_config_window_open;
+        egui::Window::new("Hotkey Configuration")
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                self.configure_hotkeys(ui);
+            });
+        self.hotkey_config_window_open = is_open;
     }
 }

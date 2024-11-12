@@ -1,6 +1,3 @@
-// https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-
 use crate::capture::ScreenData;
 use eframe::egui::{self, Color32, Stroke, Vec2};
 use image::{ImageBuffer, Rgba};
@@ -11,6 +8,7 @@ pub struct AnnotationState {
     pub current_tool: AnnotationTool,
     pub drawing: bool,
     pub current_points: Vec<Vec2>,
+    pub text_input: String, // Add this field
 }
 
 impl Default for AnnotationState {
@@ -21,7 +19,18 @@ impl Default for AnnotationState {
             current_tool: AnnotationTool::Pen,
             drawing: false,
             current_points: Vec::new(),
+            text_input: String::new(),
         }
+    }
+}
+
+impl AnnotationState {
+    pub fn add_annotation(&mut self, shape: AnnotationShape, color: Color32) {
+        self.annotations.push(Annotation {
+            shape,
+            color,
+            thickness: 2.0,
+        });
     }
 }
 
@@ -63,16 +72,12 @@ pub fn apply_annotations(screen_data: &mut ScreenData, state: &AnnotationState) 
 
         // Draw annotations onto the image buffer
         for annotation in &state.annotations {
-            match &annotation.shape {
-                AnnotationShape::Line(points) => {
-                    for window in points.windows(2) {
-                        if let [start, end] = window {
-                            draw_line(&mut img, start, end, annotation.color);
-                        }
+            if let AnnotationShape::Line(points) = &annotation.shape {
+                for window in points.windows(2) {
+                    if let [start, end] = window {
+                        draw_line(&mut img, start, end, annotation.color);
                     }
                 }
-                // Handle other shapes as needed
-                _ => {}
             }
         }
 
@@ -128,46 +133,165 @@ pub fn draw_annotations(ui: &mut egui::Ui, state: &mut AnnotationState) {
                     state.current_tool = AnnotationTool::Text;
                 }
             });
-            ui.label("Use the mouse to draw annotations.");
+
             let response = ui.allocate_response(ui.available_size(), egui::Sense::drag());
-            if response.drag_started() {
-                state.drawing = true;
-                state.current_points.clear();
+            let response_rect = response.rect;
+
+            match state.current_tool {
+                AnnotationTool::Pen => handle_pen_tool(response, state),
+                AnnotationTool::Arrow => handle_arrow_tool(response, state),
+                AnnotationTool::Text => handle_text_tool(response, ui, state),
             }
-            if state.drawing && response.dragged() {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    state.current_points.push(pos.to_vec2());
-                }
-            }
-            if response.drag_stopped() {
-                state.drawing = false;
-                if !state.current_points.is_empty() {
-                    state.annotations.push(Annotation {
-                        shape: AnnotationShape::Line(state.current_points.clone()),
-                        color: Color32::RED,
-                        thickness: 2.0,
-                    });
-                    state.current_points.clear();
-                }
-            }
+
             // Draw existing annotations
-            let painter = ui.painter_at(response.rect);
+            let painter = ui.painter_at(response_rect);
             for annotation in &state.annotations {
                 match &annotation.shape {
                     AnnotationShape::Line(points) => {
                         painter.add(egui::Shape::line(
                             points
-                                .clone()
-                                .into_iter()
+                                .iter()
                                 .map(|v| egui::Pos2::from((v.x, v.y)))
                                 .collect(),
                             Stroke::new(annotation.thickness, annotation.color),
                         ));
                     }
-                    // ...handle other shapes...
-                    _ => {}
+                    AnnotationShape::Arrow(start, end) => {
+                        draw_arrow(
+                            &painter,
+                            *start,
+                            *end,
+                            annotation.color,
+                            annotation.thickness,
+                        );
+                    }
+                    AnnotationShape::Text(text, pos) => {
+                        painter.text(
+                            egui::Pos2::from((pos.x, pos.y)),
+                            egui::Align2::LEFT_TOP,
+                            text,
+                            egui::FontId::proportional(14.0),
+                            annotation.color,
+                        );
+                    }
                 }
             }
         });
     }
+}
+
+fn handle_pen_tool(response: egui::Response, state: &mut AnnotationState) {
+    if response.drag_started() {
+        state.drawing = true;
+        state.current_points.clear();
+    }
+    if state.drawing && response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            state.current_points.push(pos.to_vec2());
+        }
+    }
+    if response.drag_stopped() {
+        state.drawing = false;
+        if !state.current_points.is_empty() {
+            state.add_annotation(
+                AnnotationShape::Line(state.current_points.clone()),
+                Color32::RED,
+            );
+            state.current_points.clear();
+        }
+    }
+}
+
+fn handle_arrow_tool(response: egui::Response, state: &mut AnnotationState) {
+    if response.drag_started() {
+        state.drawing = true;
+        if let Some(pos) = response.interact_pointer_pos() {
+            state.current_points = vec![pos.to_vec2()];
+        }
+    }
+    if state.drawing && response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            if state.current_points.len() > 1 {
+                state.current_points[1] = pos.to_vec2();
+            } else {
+                state.current_points.push(pos.to_vec2());
+            }
+        }
+    }
+    if response.drag_stopped() {
+        state.drawing = false;
+        if state.current_points.len() == 2 {
+            state.add_annotation(
+                AnnotationShape::Arrow(state.current_points[0], state.current_points[1]),
+                Color32::RED,
+            );
+            state.current_points.clear();
+        }
+    }
+}
+
+fn handle_text_tool(response: egui::Response, ui: &mut egui::Ui, state: &mut AnnotationState) {
+    if response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            egui::Window::new("Enter Text")
+                .id(egui::Id::new("text_input"))
+                .show(ui.ctx(), |ui| {
+                    ui.heading("Enter Text");
+                    let text_edit = ui.text_edit_singleline(&mut state.text_input);
+                    if (ui.button("Add").clicked()
+                        || text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        && !state.text_input.is_empty()
+                    {
+                        state.add_annotation(
+                            AnnotationShape::Text(state.text_input.clone(), pos.to_vec2()),
+                            Color32::RED,
+                        );
+                        state.text_input.clear();
+                        ui.close_menu();
+                    }
+                });
+        }
+    }
+}
+
+fn draw_arrow(painter: &egui::Painter, start: Vec2, end: Vec2, color: Color32, thickness: f32) {
+    painter.add(egui::Shape::line_segment(
+        [
+            egui::Pos2::from((start.x, start.y)),
+            egui::Pos2::from((end.x, end.y)),
+        ],
+        Stroke::new(thickness, color),
+    ));
+
+    // Calculate arrow head
+    let direction = (end - start).normalized();
+    let arrow_size = 10.0;
+    let angle = std::f32::consts::PI / 6.0; // 30 degrees
+
+    let rot_left = Vec2::new(
+        direction.x * f32::cos(angle) - direction.y * f32::sin(angle),
+        direction.x * f32::sin(angle) + direction.y * f32::cos(angle),
+    );
+    let rot_right = Vec2::new(
+        direction.x * f32::cos(-angle) - direction.y * f32::sin(-angle),
+        direction.x * f32::sin(-angle) + direction.y * f32::cos(-angle),
+    );
+
+    let arrow_left = end - rot_left * arrow_size;
+    let arrow_right = end - rot_right * arrow_size;
+
+    painter.add(egui::Shape::line_segment(
+        [
+            egui::Pos2::from((end.x, end.y)),
+            egui::Pos2::from((arrow_left.x, arrow_left.y)),
+        ],
+        Stroke::new(thickness, color),
+    ));
+    painter.add(egui::Shape::line_segment(
+        [
+            egui::Pos2::from((end.x, end.y)),
+            egui::Pos2::from((arrow_right.x, arrow_right.y)),
+        ],
+        Stroke::new(thickness, color),
+    ));
 }

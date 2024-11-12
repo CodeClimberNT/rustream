@@ -4,13 +4,13 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use futures::FutureExt;
 
 #[derive(Serialize, Deserialize)]
 struct StreamData {
     frame: Vec<u8>,
     width: u32,
     height: u32,
-    // Additional fields if needed
 }
 
 pub async fn start_streaming(
@@ -74,11 +74,36 @@ pub async fn start_receiving(address: &str, enable_recording: bool) {
     match TcpStream::connect(address).await {
         Ok(mut stream) => {
             let mut buffer = Vec::new();
-            let mut recorder = if enable_recording {
-                Some(recording::start_recording("received_output.mp4"))
-            } else {
-                None
-            };
+            let (recorder_tx, mut recorder_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, u32, u32)>(32);
+            let recorder_shutdown = Arc::new(tokio::sync::Notify::new());
+            let shutdown_signal = recorder_shutdown.clone();
+
+            if enable_recording {
+                std::thread::spawn(move || {
+                    // Wait for the first frame to get dimensions
+                    let (first_frame, width, height) = recorder_rx.blocking_recv().unwrap();
+                    let mut recorder = recording::start_recording("received_output.mp4", width, height);
+                    // Record the first frame
+                    recorder.record_frame(&first_frame, width, height);
+                    loop {
+                        if recorder_shutdown.notified().now_or_never().is_some() {
+                            recording::stop_recording(&mut recorder);
+                            break;
+                        }
+                        if let Some(frame_data) = recorder_rx.blocking_recv() {
+                            let (frame, width, height) = frame_data;
+                            recorder.record_frame(&frame, width, height);
+                        }
+                    }
+                });
+            }
+
+            // Add cleanup on connection drop
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.ok();
+                shutdown_signal.notify_one();
+            });
+
             loop {
                 let mut temp_buffer = vec![0; 65536]; // Adjust buffer size as needed
                 match stream.read(&mut temp_buffer).await {
@@ -92,21 +117,14 @@ pub async fn start_receiving(address: &str, enable_recording: bool) {
                 // Deserialize screen data
                 if let Ok(data) = serde_json::from_slice::<StreamData>(&buffer) {
                     // Handle received screen data
-                    // Display or save the frame
-
-                    // Record the frame if recording is enabled
-                    if let Some(ref mut recorder) = recorder {
-                        recorder.record_frame(&data.frame, data.width, data.height);
+                    if enable_recording {
+                        recorder_tx.send((data.frame, data.width, data.height)).await.unwrap();
                     }
-                    buffer.clear();
                 }
-            }
-            if let Some(ref mut recorder) = recorder {
-                recorder.stop_recording();
             }
         }
         Err(e) => {
-            eprintln!("Failed to connect to {}: {}", address, e);
+            eprintln!("Failed to connect to {}: {}", address, e)
         }
     }
 }
