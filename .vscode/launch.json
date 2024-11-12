@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'multi-platform-screen-casting'",
+            "name": "Debug executable 'rustream'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=multi-platform-screen-casting",
-                    "--package=multi-platform-screen-casting"
+                    "--bin=rustream",
+                    "--package=rustream"
                 ],
                 "filter": {
-                    "name": "multi-platform-screen-casting",
+                    "name": "rustream",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'multi-platform-screen-casting'",
+            "name": "Debug unit tests in executable 'rustream'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=multi-platform-screen-casting",
-                    "--package=multi-platform-screen-casting"
+                    "--bin=rustream",
+                    "--package=rustream"
                 ],
                 "filter": {
-                    "name": "multi-platform-screen-casting",
+                    "name": "rustream",
                     "kind": "bin"
                 }
             },
@@ -44,17 +44,35 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Run executable 'multi-platform-screen-casting'",
+            "name": "Run executable 'Rustream'",
             "cargo": {
                 "args": [
                     "run"
                 ],
                 "filter": {
-                    "name": "multi-platform-screen-casting",
+                    "name": "rustream",
                     "kind": "bin"
                 }
             },
             "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Run executable 'Rustream'",
+            "cargo": {
+                "args": [
+                    "run"
+                ],
+                "filter": {
+                    "name": "rustream",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "--release"
+            ],
             "cwd": "${workspaceFolder}"
         }
     ]

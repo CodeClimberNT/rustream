@@ -11,7 +11,9 @@ unsafe_code = "forbid"
 
 [dependencies]
 # GUI Framework
-eframe = { version = "0.29.1", features = ["glow"], default-features = false, optional = true }
+eframe = { version = "0.29.1", features = [
+    "glow",
+], default-features = false, optional = true }
 egui = { version = "0.29.1", optional = true }
 
 # Screen Capture
@@ -29,10 +31,11 @@ winit = "0.30.5"
 # Annotations
 # Use a drawing crate compatible with egui
 egui_extras = { version = "0.29.1", optional = true }
-image = { version = "0.24.3", features = ["png", "jpeg"] }
+image = { version = "0.25.5", features = ["png", "jpeg"] }
 
 # Recording
-ffmpeg-next = { version = "7.1.0", features = ["static"] }
+# ffmpeg-next = { version = "7.1.0", features = ["static"] }
+ffmpeg-next = "7.1.0"
 
 # Logging
 log = "0.4.22"
@@ -45,6 +48,8 @@ crossbeam = "0.8.2"
 
 # For global hotkeys
 inputbot = "0.6.0"
+bytemuck = "1.19.0"
+futures = "0.3.31"
 
 [features]
 default = ["gui"]
@@ -52,9 +57,12 @@ gui = ["eframe", "egui", "egui_extras"]
 
 [profile.release]
 opt-level = 3
+lto = true
 
 [profile.dev]
 opt-level = 2
 
+
 [build-dependencies]
-ffmpeg-sys-next = { version = "7.1.0", features = ["build", "static"] }
+# ffmpeg-sys-next = "7.1.0"
+# ffmpeg-sys-next = { version = "7.1.0", features = ["build", "static"] }

@@ -1,41 +1,48 @@
 use std::sync::{Arc, Mutex};
-use winit::{
-    event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
-use inputbot::KeybdKey::*;
 use std::thread;
+use winit::event::Event;
+use winit::keyboard::KeyCode;
 
-#[derive(Default)]
 pub struct HotkeyConfig {
-    pub pause: VirtualKeyCode,
-    pub blank: VirtualKeyCode,
-    pub terminate: VirtualKeyCode,
+    pub pause: KeyCode,
+    pub blank: KeyCode,
+    pub terminate: KeyCode,
     pub paused: Arc<Mutex<bool>>,
     pub terminate_flag: Arc<Mutex<bool>>,
 }
 
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        HotkeyConfig {
+            pause: KeyCode::Escape, // Provide a default value
+            blank: KeyCode::Space,  // Provide a default value
+            terminate: KeyCode::Enter, // Provide a default value
+            paused: Arc::new(Mutex::new(false)),
+            terminate_flag: Arc::new(Mutex::new(false)),
+        }
+    }
+}
 pub fn initialize_hotkeys(config: Arc<HotkeyConfig>) {
     let pause_config = Arc::clone(&config);
-    let blank_config = Arc::clone(&config);
+    // let blank_config = Arc::clone(&config);
     let terminate_config = Arc::clone(&config);
 
-    // Map hotkeys using the updated inputbot API
-    if let Some(key) = egui_key_to_inputbot(config.pause) {
+    // Map hotkeys using the updated mapping function
+    if let Some(key) = winit_key_to_inputbot(config.pause) {
         key.bind(move || {
             let mut paused = pause_config.paused.lock().unwrap();
             *paused = !*paused;
         });
     }
 
-    if let Some(key) = egui_key_to_inputbot(config.blank) {
+    if let Some(key) = winit_key_to_inputbot(config.blank) {
         key.bind(move || {
             // Implement blank screen functionality if needed
         });
     }
 
-    if let Some(key) = egui_key_to_inputbot(config.terminate) {
+    if let Some(key) = winit_key_to_inputbot(config.terminate) {
         key.bind(move || {
             let mut terminate_flag = terminate_config.terminate_flag.lock().unwrap();
             *terminate_flag = true;
@@ -48,40 +55,39 @@ pub fn initialize_hotkeys(config: Arc<HotkeyConfig>) {
     });
 }
 
-fn egui_key_to_inputbot(key: egui::Key) -> Option<inputbot::KeybdKey> {
-    // Map egui::Key to inputbot::KeybdKey as per inputbot 0.6.0 API
+fn winit_key_to_inputbot(key: KeyCode) -> Option<inputbot::KeybdKey> {
     match key {
-        egui::Key::A => Some(AKey),
-        egui::Key::B => Some(BKey),
-        egui::Key::C => Some(CKey),
-        egui::Key::D => Some(DKey),
-        egui::Key::E => Some(EKey),
-        egui::Key::F => Some(FKey),
-        egui::Key::G => Some(GKey),
-        egui::Key::H => Some(HKey),
-        egui::Key::I => Some(IKey),
-        egui::Key::J => Some(JKey),
-        egui::Key::K => Some(KKey),
-        egui::Key::L => Some(LKey),
-        egui::Key::M => Some(MKey),
-        egui::Key::N => Some(NKey),
-        egui::Key::O => Some(OKey),
-        egui::Key::P => Some(PKey),
-        egui::Key::Q => Some(QKey),
-        egui::Key::R => Some(RKey),
-        egui::Key::S => Some(SKey),
-        egui::Key::T => Some(TKey),
-        egui::Key::U => Some(UKey),
-        egui::Key::V => Some(VKey),
-        egui::Key::W => Some(WKey),
-        egui::Key::X => Some(XKey),
-        egui::Key::Y => Some(YKey),
-        egui::Key::Z => Some(ZKey),
-        egui::Key::Escape => Some(EscapeKey),
-        egui::Key::Space => Some(SpaceKey),
-        egui::Key::Enter => Some(ReturnKey),
-        egui::Key::Tab => Some(TabKey),
-        // Map additional keys as needed
+        KeyCode::KeyA => Some(inputbot::KeybdKey::AKey),
+        KeyCode::KeyB => Some(inputbot::KeybdKey::BKey),
+        KeyCode::KeyC => Some(inputbot::KeybdKey::CKey),
+        KeyCode::KeyD => Some(inputbot::KeybdKey::DKey),
+        KeyCode::KeyE => Some(inputbot::KeybdKey::EKey),
+        KeyCode::KeyF => Some(inputbot::KeybdKey::FKey),
+        KeyCode::KeyG => Some(inputbot::KeybdKey::GKey),
+        KeyCode::KeyH => Some(inputbot::KeybdKey::HKey),
+        KeyCode::KeyI => Some(inputbot::KeybdKey::IKey),
+        KeyCode::KeyJ => Some(inputbot::KeybdKey::JKey),
+        KeyCode::KeyK => Some(inputbot::KeybdKey::KKey),
+        KeyCode::KeyL => Some(inputbot::KeybdKey::LKey),
+        KeyCode::KeyM => Some(inputbot::KeybdKey::MKey),
+        KeyCode::KeyN => Some(inputbot::KeybdKey::NKey),
+        KeyCode::KeyO => Some(inputbot::KeybdKey::OKey),
+        KeyCode::KeyP => Some(inputbot::KeybdKey::PKey),
+        KeyCode::KeyQ => Some(inputbot::KeybdKey::QKey),
+        KeyCode::KeyR => Some(inputbot::KeybdKey::RKey),
+        KeyCode::KeyS => Some(inputbot::KeybdKey::SKey),
+        KeyCode::KeyT => Some(inputbot::KeybdKey::TKey),
+        KeyCode::KeyU => Some(inputbot::KeybdKey::UKey),
+        KeyCode::KeyV => Some(inputbot::KeybdKey::VKey),
+        KeyCode::KeyW => Some(inputbot::KeybdKey::WKey),
+        KeyCode::KeyX => Some(inputbot::KeybdKey::XKey),
+        KeyCode::KeyY => Some(inputbot::KeybdKey::YKey),
+        KeyCode::KeyZ => Some(inputbot::KeybdKey::ZKey),
+        KeyCode::Escape => Some(inputbot::KeybdKey::EscapeKey),
+        KeyCode::Space => Some(inputbot::KeybdKey::SpaceKey),
+        KeyCode::Enter => Some(inputbot::KeybdKey::EnterKey),
+        KeyCode::Tab => Some(inputbot::KeybdKey::TabKey),
+        // Add mappings for additional keys as needed
         _ => None,
     }
 }
@@ -94,44 +100,29 @@ pub fn should_terminate(config: &Arc<HotkeyConfig>) -> bool {
     *config.terminate_flag.lock().unwrap()
 }
 
-fn handle_keyboard_input(input: KeyboardInput, config: &Arc<HotkeyConfig>) {
-    if let Some(keycode) = input.virtual_keycode {
-        if input.state == ElementState::Pressed {
-            if keycode == config.pause {
-                let mut paused = config.paused.lock().unwrap();
-                *paused = !*paused;
-            } else if keycode == config.blank {
-                // Implement blank screen functionality
-            } else if keycode == config.terminate {
-                let mut terminate_flag = config.terminate_flag.lock().unwrap();
-                *terminate_flag = true;
-            }
-        }
-    }
-}
-
 pub fn handle_event(event: &Event<()>, config: &Arc<HotkeyConfig>) {
-    if let Event::WindowEvent {
-        event: WindowEvent::KeyboardInput { event, .. },
-        ..
-    } = event
-    {
-        if let Some(virtual_keycode) = event.logical_key.decode() {
-            let state = event.state;
-            match (virtual_keycode, state) {
-                (k, ElementState::Pressed) if k == config.pause => {
-                    let mut paused = config.paused.lock().unwrap();
-                    *paused = !*paused;
-                }
-                (k, ElementState::Pressed) if k == config.blank => {
-                    // Implement blank screen functionality
-                }
-                (k, ElementState::Pressed) if k == config.terminate => {
-                    let mut terminate = config.terminate_flag.lock().unwrap();
-                    *terminate = true;
-                }
-                _ => {}
-            }
-        }
-    }
+    return;
+    // if let Event::WindowEvent {
+    //     event: WindowEvent::KeyboardInput { event, .. },
+    //     ..
+    // } = event
+    // {
+    //     if let Some(virtual_keycode) = event.logical_key.clone() {
+    //         let state = event.state;
+    //         match (virtual_keycode, state) {
+    //             (Some(k), ElementState::Pressed) if k == config.pause => {
+    //                 let mut paused = config.paused.lock().unwrap();
+    //                 *paused = !*paused;
+    //             }
+    //             (Some(k), ElementState::Pressed) if k == config.blank => {
+    //                 // Implement blank screen functionality
+    //             }
+    //             (Some(k), ElementState::Pressed) if k == config.terminate => {
+    //                 let mut terminate = config.terminate_flag.lock().unwrap();
+    //                 *terminate = true;
+    //             }
+    //             _ => {}
+    //         }
+    //     }
+    // }
 }

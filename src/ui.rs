@@ -1,14 +1,15 @@
 use crate::{annotations, capture, hotkeys, multimonitor, network, recording};
 use eframe::egui;
-use std::sync::{Arc, Mutex};
-use tokio::runtime::Runtime;
+use std::sync::Arc;
+use tokio::runtime::{Builder, Runtime};
+use tokio::sync::Mutex;
 
 pub fn initialize_ui() {
     let options: eframe::NativeOptions = eframe::NativeOptions::default();
-    eframe::run_native(
+    _ = eframe::run_native(
         "Rustream",
         options,
-        Box::new(|_cc: &eframe::CreationContext<'_>| Box::new(RustreamApp::default())),
+        Box::new(|_cc: &eframe::CreationContext<'_>| Ok(Box::new(RustreamApp::default()))),
     );
 }
 
@@ -39,7 +40,7 @@ impl Default for RustreamApp {
             selected_monitor: None,
             custom_area: None,
             caster_address: String::new(),
-            runtime: Arc::new(Runtime::new().unwrap()),
+            runtime: Arc::new(Builder::new_multi_thread().enable_all().build().unwrap()),
             annotation_state: Arc::new(Mutex::new(annotations::AnnotationState::default())),
             hotkey_config: Arc::new(hotkeys::HotkeyConfig::default()),
             recording_state: None,
@@ -66,9 +67,9 @@ impl eframe::App for RustreamApp {
                     } = event
                     {
                         match hotkey_name {
-                            "pause" => self.hotkey_config.pause = *key,
-                            "blank" => self.hotkey_config.blank = *key,
-                            "terminate" => self.hotkey_config.terminate = *key,
+                            // "pause" => self.hotkey_config.pause = key.code,
+                            // "blank" => self.hotkey_config.blank = key.code,
+                            // "terminate" => self.hotkey_config.terminate = key.code,
                             _ => {}
                         }
                         self.configuring_hotkey = None;
@@ -140,10 +141,13 @@ impl RustreamApp {
         self.selected_monitor = Some(multimonitor::select_monitor(0));
         self.hotkey_config = Arc::new(hotkeys::HotkeyConfig::default());
         hotkeys::initialize_hotkeys(Arc::clone(&self.hotkey_config));
+        // Added initialization for recording_state
+        self.recording_state = None;
     }
 
     fn initialize_receiver(&mut self) {
         // Initialize receiver-specific settings
+        self.caster_address = String::new();
     }
 
     fn caster_ui(&mut self, ctx: &egui::Context) {
@@ -164,15 +168,19 @@ impl RustreamApp {
             }
             // Annotation Tools
             if ui.button("Toggle Annotations").clicked() {
-                let mut state = self.annotation_state.lock().unwrap();
-                annotations::toggle_annotations(&mut state, !state.active);
+                let mut state = futures::executor::block_on(self.annotation_state.lock());
+                let active = !state.active;
+                annotations::toggle_annotations(&mut state, active);
             }
             // Hotkey Configuration
             if ui.button("Configure Hotkeys").clicked() {
                 self.configure_hotkeys(ui);
             }
             // Draw Annotations
-            annotations::draw_annotations(ui, &mut self.annotation_state.lock().unwrap());
+            annotations::draw_annotations(
+                ui,
+                &mut futures::executor::block_on(self.annotation_state.lock()),
+            );
         });
     }
 
@@ -241,8 +249,11 @@ impl RustreamApp {
         let runtime = Arc::clone(&self.runtime);
         let address = self.caster_address.clone();
         let enable_recording = self.recording_state.is_some();
-        runtime.spawn(async move {
-            network::start_receiving(&address, enable_recording).await;
+        tokio::task::spawn_blocking(move || {
+            let runtime = Arc::clone(&runtime);
+            runtime.block_on(async {
+                network::start_receiving(&address, enable_recording).await;
+            });
         });
     }
 

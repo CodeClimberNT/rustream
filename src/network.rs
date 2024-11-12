@@ -1,8 +1,9 @@
-use crate::{annotations, capture, hotkeys};
+use crate::{annotations, capture, hotkeys, recording};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 
 #[derive(Serialize, Deserialize)]
 struct StreamData {
@@ -23,7 +24,13 @@ pub async fn start_streaming(
     println!("Streaming on port 8080");
 
     loop {
-        let (mut socket, _) = listener.accept().await.expect("Failed to accept");
+        let (mut socket, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("Failed to accept connection: {}", e);
+                continue;
+            }
+        };
         let area = area.clone();
         let hotkey_config = Arc::clone(&hotkey_config);
         let annotation_state = Arc::clone(&annotation_state);
@@ -40,8 +47,7 @@ pub async fn start_streaming(
                 // Capture screen data
                 let mut screen_data = capture::capture_screen(area.clone());
 
-                // Apply annotations if active
-                let state = annotation_state.lock().unwrap();
+                let state = annotation_state.lock().await;
                 if state.active {
                     annotations::apply_annotations(&mut screen_data, &state);
                 }
@@ -65,39 +71,42 @@ pub async fn start_streaming(
 }
 
 pub async fn start_receiving(address: &str, enable_recording: bool) {
-    if let Ok(mut stream) = TcpStream::connect(address).await {
-        let mut buffer = Vec::new();
-        let mut recorder = if enable_recording {
-            Some(recording::start_recording("received_output.mp4"))
-        } else {
-            None
-        };
-        loop {
-            let mut temp_buffer = vec![0; 65536]; // Adjust buffer size as needed
-            match stream.read(&mut temp_buffer).await {
-                Ok(0) => break,
-                Ok(n) => buffer.extend_from_slice(&temp_buffer[..n]),
-                Err(e) => {
-                    println!("Failed to read from stream: {}", e);
-                    break;
+    match TcpStream::connect(address).await {
+        Ok(mut stream) => {
+            let mut buffer = Vec::new();
+            let mut recorder = if enable_recording {
+                Some(recording::start_recording("received_output.mp4"))
+            } else {
+                None
+            };
+            loop {
+                let mut temp_buffer = vec![0; 65536]; // Adjust buffer size as needed
+                match stream.read(&mut temp_buffer).await {
+                    Ok(0) => break,
+                    Ok(n) => buffer.extend_from_slice(&temp_buffer[..n]),
+                    Err(e) => {
+                        eprintln!("Failed to read from stream: {}", e);
+                        break;
+                    }
                 }
-            }
-            // Deserialize screen data
-            if let Ok(data) = serde_json::from_slice::<StreamData>(&buffer) {
-                // Handle received screen data
-                // Display or save the frame
+                // Deserialize screen data
+                if let Ok(data) = serde_json::from_slice::<StreamData>(&buffer) {
+                    // Handle received screen data
+                    // Display or save the frame
 
-                // Record the frame if recording is enabled
-                if let Some(ref mut recorder) = recorder {
-                    recorder.record_frame(&data.frame, data.width, data.height);
+                    // Record the frame if recording is enabled
+                    if let Some(ref mut recorder) = recorder {
+                        recorder.record_frame(&data.frame, data.width, data.height);
+                    }
+                    buffer.clear();
                 }
-                buffer.clear();
+            }
+            if let Some(ref mut recorder) = recorder {
+                recorder.stop_recording();
             }
         }
-        if let Some(ref mut recorder) = recorder {
-            recorder.stop_recording();
+        Err(e) => {
+            eprintln!("Failed to connect to {}: {}", address, e);
         }
-    } else {
-        println!("Failed to connect to {}", address);
     }
 }

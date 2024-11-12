@@ -18,10 +18,30 @@ pub struct ScreenData {
 }
 
 pub fn capture_screen(area: Option<ScreenArea>) -> ScreenData {
-    let display = Display::primary().expect("No primary display found.");
+    let display = match Display::primary() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("No primary display found: {}", e);
+            return ScreenData {
+                data: Vec::new(),
+                width: 0,
+                height: 0,
+            };
+        }
+    };
 
-    let mut capturer = Capturer::new(display).expect("Could not begin capture.");
-    let (width, height) = (capturer.width(), capturer.height());
+    let mut capturer = match Capturer::new(display) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not begin capture: {}", e);
+            return ScreenData {
+                data: Vec::new(),
+                width: 0,
+                height: 0,
+            };
+        }
+    };
+    let (width, height) = (capturer.width() as u32, capturer.height() as u32);
 
     loop {
         match capturer.frame() {
@@ -44,7 +64,12 @@ pub fn capture_screen(area: Option<ScreenArea>) -> ScreenData {
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 } else {
-                    panic!("Error: {}", error);
+                    eprintln!("Error capturing screen: {}", error);
+                    return ScreenData {
+                        data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                    };
                 }
             }
         }

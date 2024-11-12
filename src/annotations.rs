@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use crate::capture::ScreenData;
-use eframe::egui::{self, Color32, PaintCallback, Stroke, Vec2};
+use eframe::egui::{self, Color32, Stroke, Vec2};
 use image::{ImageBuffer, Rgba};
 
 pub struct AnnotationState {
@@ -48,29 +48,37 @@ pub fn toggle_annotations(state: &mut AnnotationState, active: bool) {
 }
 
 pub fn apply_annotations(screen_data: &mut ScreenData, state: &AnnotationState) {
-    // Convert the screen data into an image buffer
-    let width = screen_data.width;
-    let height = screen_data.height;
-    let mut img = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, screen_data.data.clone())
-        .expect("Failed to create image buffer");
+    if !state.annotations.is_empty() {
+        // Convert the screen data into an image buffer
+        let width = screen_data.width;
+        let height = screen_data.height;
+        let mut img =
+            match ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, screen_data.data.clone()) {
+                Some(buffer) => buffer,
+                None => {
+                    eprintln!("Failed to create image buffer from screen data.");
+                    return;
+                }
+            };
 
-    // Draw annotations onto the image buffer
-    for annotation in &state.annotations {
-        match &annotation.shape {
-            AnnotationShape::Line(points) => {
-                for window in points.windows(2) {
-                    if let [start, end] = window {
-                        draw_line(&mut img, start, end, annotation.color);
+        // Draw annotations onto the image buffer
+        for annotation in &state.annotations {
+            match &annotation.shape {
+                AnnotationShape::Line(points) => {
+                    for window in points.windows(2) {
+                        if let [start, end] = window {
+                            draw_line(&mut img, start, end, annotation.color);
+                        }
                     }
                 }
+                // Handle other shapes as needed
+                _ => {}
             }
-            // Handle other shapes as needed
-            _ => {}
         }
-    }
 
-    // Update the screen data with the annotated image
-    screen_data.data = img.into_raw();
+        // Update the screen data with the annotated image
+        screen_data.data = img.into_raw();
+    }
 }
 
 fn draw_line(image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, start: &Vec2, end: &Vec2, color: Color32) {
@@ -128,10 +136,10 @@ pub fn draw_annotations(ui: &mut egui::Ui, state: &mut AnnotationState) {
             }
             if state.drawing && response.dragged() {
                 if let Some(pos) = response.interact_pointer_pos() {
-                    state.current_points.push(pos);
+                    state.current_points.push(pos.to_vec2());
                 }
             }
-            if response.drag_released() {
+            if response.drag_stopped() {
                 state.drawing = false;
                 if !state.current_points.is_empty() {
                     state.annotations.push(Annotation {
@@ -147,12 +155,14 @@ pub fn draw_annotations(ui: &mut egui::Ui, state: &mut AnnotationState) {
             for annotation in &state.annotations {
                 match &annotation.shape {
                     AnnotationShape::Line(points) => {
-                        painter.polyline(
-                            points.clone(),
-                            false,
-                            annotation.color,
+                        painter.add(egui::Shape::line(
+                            points
+                                .clone()
+                                .into_iter()
+                                .map(|v| egui::Pos2::from((v.x, v.y)))
+                                .collect(),
                             Stroke::new(annotation.thickness, annotation.color),
-                        );
+                        ));
                     }
                     // ...handle other shapes...
                     _ => {}
