@@ -44,17 +44,11 @@ image = { version = "0.25.5", features = ["png", "jpeg"] }
 # Recording
 ffmpeg-next = "7.1.0"
 
-# Logging
-log = "0.4.22"
-env_logger = "0.11.5"
-
 # For global hotkeys
 
 # Casting utility
 bytemuck = "1.19.0"
 
-# Cleanup handling
-scopeguard = "1.2"
 
 [features]
 default = ["gui"]

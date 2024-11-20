@@ -10,9 +10,6 @@ mod recording;
 mod ui;
 
 fn main() {
-    // Initialize the logger
-    env_logger::init();
-
     // Start the UI
     ui::initialize_ui();
 }
