@@ -1,10 +1,15 @@
+use std::thread;
+use std::time::Duration;
+use image::{ImageBuffer, Rgba};
+use std::sync::mpsc::sync_channel;
 
 use crate::capture_screen::{get_monitors, take_screenshot};
 // Importing all the necessary libraries
 // self -> import the module egui itself
-use eframe::egui::{self, CentralPanel, Color32, ComboBox, Context, FontId, RichText};
+use eframe::egui::{self, CentralPanel, Color32, ComboBox, Context, FontId, RichText, TextureHandle};
 use log::debug;
 // use scrap::Display;
+
 
 #[derive(Default)]
 pub struct AppInterface {
@@ -15,6 +20,7 @@ pub struct AppInterface {
     address_text: String, // Text input for the receiver mode
 
     is_rendering_screenshot: bool,
+    current_texture: Option<egui::TextureHandle>,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -46,6 +52,7 @@ impl AppInterface {
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
             is_rendering_screenshot: false,
+            current_texture: None,
         }
     }
 
@@ -106,22 +113,63 @@ impl AppInterface {
 
 
                 if self.is_rendering_screenshot {
+                    
                     // take_screenshot(self.selected_monitor);
-                    let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [
-                            monitor_feedback.width() as usize,
-                            monitor_feedback.height() as usize,
-                        ],
-                        &monitor_feedback,
-                    );
-                    let texture = ui.ctx().load_texture(
-                        "monitor_feedback",
-                        image,
-                        egui::TextureOptions::default(),
-                    );
-                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
+                    //let (tx, rx) = sync_channel(1);
 
+                    let monitor_feedback = take_screenshot(self.selected_monitor); // Capture the primary monitor (index 0) , tx.clone()
+                    match monitor_feedback {
+                        Ok(monitor_feedback) => {
+                            let image = egui::ColorImage::from_rgba_unmultiplied(
+                                [
+                                    monitor_feedback.width() as usize,
+                                    monitor_feedback.height() as usize,
+                                ],
+                                &monitor_feedback,
+                            );
+
+                          
+                            let texture = ui.ctx().load_texture("monitor_feedback", image, egui::TextureOptions::default());
+                            ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
+                            //ui.add(egui::Image::new(texture));
+                            //ui.ctx().request_repaint_after(Duration::from_millis(200));
+                            //drop(monitor_feedback);
+                            ui.ctx().request_repaint();
+                            
+                            //drop(texture);
+                           
+                            //ui.ctx().request_repaint();
+                        },
+                        Err(_) => {
+                            ui.label("Failed to capture the monitor");
+                        }
+                    }
+                    //while let Ok(monitor_feedback) = rx.try_recv() {
+                        /*let image = egui::ColorImage::from_rgba_unmultiplied(
+                            [
+                                monitor_feedback.width() as usize,
+                                monitor_feedback.height() as usize,
+                            ],
+                            &monitor_feedback,
+                        );
+
+                        self.texture = Some(ui.ctx().load_texture(
+                            "monitor_feedback",
+                            image,
+                            egui::TextureOptions::default(),
+                        ));*/
+                        /*let texture = ui.ctx().load_texture(
+                            "monitor_feedback",
+                            image,
+                            egui::TextureOptions::default(),
+                        );*/
+                        
+                    //ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
+                    
+                    //let image = load_image_from_bytes(monitor_feedback).expect("Failed to load image");
+                    
+                    //ui.add(egui::Image::from_bytes(&monitor_feedback).max_width(self.width(ui.ctx()) / 1.5));
+                    //}
                 }
             });
         });
@@ -158,8 +206,8 @@ impl eframe::App for AppInterface {
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    // Home button
 
+                    // Home button
                     if ui
                         .add_sized(
                             [30., 30.],
@@ -191,10 +239,14 @@ impl eframe::App for AppInterface {
             match self.mode {
                 PageView::HomePage => self.render_home_page(ui),
 
-                PageView::Sender => self.render_sender_page(ui),
+                PageView::Sender => {
+                    self.render_sender_page(ui);
+                    //ctx.request_repaint_after(Duration::from_millis(16));
+                },
 
                 PageView::Receiver => self.render_receiver_mode(ui),
             }
         });
+        //ctx.tex_manager().debug_ui(ctx); //per monitorare l'uso della memoria, ma non trova il metodo debug_ui
     }
 }
