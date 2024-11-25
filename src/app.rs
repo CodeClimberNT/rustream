@@ -2,23 +2,24 @@ use crate::screen_capture::ScreenCapture;
 
 // Importing all the necessary libraries
 // self -> import the module egui itself
-use eframe::egui::{self, CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText};
+use eframe::egui;
+use egui::{CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText, TextureHandle};
 use log::debug;
 
-#[derive(Default)]
-pub struct AppInterface {
-    // selected_monitor: usize,                  // Index of the selected monitor
+pub struct RustreamApp {
     screen_capturer: ScreenCapture, // List of monitors as strings for display in the menu
-    screen_texture: Option<egui::TextureHandle>, // Texture for the screen capture
-    placeholder_texture: Option<egui::TextureHandle>, // Texture for the screen capture
     mode: PageView,                 // Enum to track modes
-    // home_icon_path: &'static str, // Path for the home icon
+    // Texture
+    screen_texture: Option<TextureHandle>, // Texture for the screen capture
+    error_texture: TextureHandle,          // Texture for the screen capture
+    home_icon_texture: TextureHandle,
+    quit_icon_texture: TextureHandle,
     address_text: String, // Text input for the receiver mode
     is_rendering_screen: bool,
-    // home_icon: egui::TextureHandle,
+    should_quit: bool,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug)]
 pub enum PageView {
     #[default]
     HomePage,
@@ -26,30 +27,47 @@ pub enum PageView {
     Receiver,
 }
 
-impl AppInterface {
+impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
-        // Create a simple placeholder image (e.g., a solid color)
-        let placeholder_image = egui::ColorImage::new([1, 1], egui::Color32::GOLD);
-
-        // Load the placeholder texture
-        let placeholder_texture = cc.egui_ctx.load_texture(
-            "placeholder",
-            placeholder_image,
-            egui::TextureOptions::default(),
-        );
-        let screen_capture = ScreenCapture::default();
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
 
-        AppInterface {
+        let error_icon_texture = RustreamApp::load_texture(
+            ctx,
+            "error_icon",
+            include_bytes!("../assets/icons/error.svg"),
+            None,
+            None,
+        );
+
+        let home_icon_texture = RustreamApp::load_texture(
+            ctx,
+            "home_icon",
+            include_bytes!("../assets/icons/home.svg"),
+            Some(&error_icon_texture),
+            None,
+        );
+        let quit_icon_texture = RustreamApp::load_texture(
+            ctx,
+            "quit_icon",
+            include_bytes!("../assets/icons/quit.svg"),
+            Some(&error_icon_texture),
+            None,
+        );
+
+        let screen_capture = ScreenCapture::default();
+
+        RustreamApp {
             screen_capturer: screen_capture,
             screen_texture: None,
-            placeholder_texture: Some(placeholder_texture),
+            error_texture: error_icon_texture,
             mode: PageView::default(),
-            // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
             is_rendering_screen: false,
+            home_icon_texture,
+            quit_icon_texture,
+            should_quit: false,
         }
     }
 
@@ -150,10 +168,7 @@ impl AppInterface {
                     }
                 }
 
-                let texture = self
-                    .screen_texture
-                    .as_ref()
-                    .unwrap_or(self.placeholder_texture.as_ref().unwrap());
+                let texture = self.screen_texture.as_ref().unwrap_or(&self.error_texture);
                 ui.add(egui::Image::new(texture).max_width(self.width(ui.ctx()) / 1.5));
             } else {
                 self.screen_texture = None;
@@ -174,32 +189,79 @@ impl AppInterface {
             .on_hover_text("NOT IMPLEMENTED")
             .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
+
+    /// Utility function to load a texture from image bytes.
+    /// If loading fails, it returns the provided error_texture.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - A reference to egui::Context.
+    /// * `name` - The unique name for the texture.
+    /// * `img_bytes` - The image data as a byte slice.
+    /// * `error_texture` - A reference to the fallback error texture.
+    ///
+    /// # Returns
+    ///
+    /// * `TextureHandle` - The loaded texture or the error texture if loading fails.
+    fn load_texture(
+        ctx: &Context,
+        name: &str,
+        img_bytes: &[u8],
+        error_texture: Option<&TextureHandle>,
+        texture_options: Option<egui::TextureOptions>,
+    ) -> TextureHandle {
+        let image = match egui_extras::image::load_svg_bytes(img_bytes) {
+            Ok(img) => img,
+            Err(e) => {
+                log::error!("Failed to load image: {}", e);
+                if let Some(error_texture) = error_texture {
+                    return error_texture.clone();
+                } else {
+                    log::error!("Error Texture not found. Loading RED SQUARE as error texture");
+                    ColorImage::new([50, 50], egui::Color32::RED)
+                }
+            }
+        };
+
+        ctx.load_texture(name, image, texture_options.unwrap_or_default())
+    }
 }
 
-impl eframe::App for AppInterface {
+impl eframe::App for RustreamApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        if self.should_quit {
+            // Spawn a new thread to send the close command to the egui context
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            });
+        }
         CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     // Home button
-
                     if ui
                         .add_sized(
-                            [30., 30.],
-                            egui::ImageButton::new(egui::include_image!(
-                                // TODO: use the home_icon_path variable instead of the hardcoded path
-                                "../assets/icons/home.svg"
-                            )),
+                            [80., 30.],
+                            egui::Button::image_and_text(&self.home_icon_texture, "Home"),
                         )
-                        .on_hover_text("Home")
                         .clicked()
                     {
                         self.reset_ui();
                     }
+
+                    // Quit button
+                    if ui
+                        .add_sized(
+                            [80., 30.],
+                            egui::Button::image_and_text(&self.quit_icon_texture, "Quit"),
+                        )
+                        .clicked()
+                    {
+                        self.should_quit = true;
+                    }
                 });
 
-                // ui.image(egui::include_image!("../assets/icons/home.svg"));
-                // ;
                 ui.vertical_centered(|ui| {
                     ui.label(
                         RichText::new("Welcome to RUSTREAM!")

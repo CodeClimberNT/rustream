@@ -1,5 +1,4 @@
 use image::{ImageBuffer, Rgba};
-use log::{debug, error, info};
 use scrap::{Capturer, Display};
 
 pub struct ScreenCapture {
@@ -39,7 +38,7 @@ impl ScreenCapture {
     pub fn set_monitor_index(&mut self, index: usize) {
         self.selected_monitor = index;
         self.reset_capture();
-        info!("Selected monitor: {}", self.selected_monitor);
+        log::info!("Selected monitor: {}", self.selected_monitor);
     }
 
     pub fn get_monitors(&self) -> &Vec<String> {
@@ -64,19 +63,20 @@ impl ScreenCapture {
                     ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(self.width, self.height, buffer)
                         .unwrap();
                 self.captured_image = image.clone();
-                debug!(
+                log::debug!(
                     "Captured frame with dimensions {}x{}",
-                    self.width, self.height
+                    self.width,
+                    self.height
                 );
                 Some(image)
             }
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
-                    debug!("Frame not ready; skipping this frame.");
+                    log::debug!("Frame not ready; skipping this frame.");
                     None
                 }
                 _ => {
-                    error!("{e:?}");
+                    log::error!("{e:?}");
                     None
                 }
             },

@@ -4,7 +4,7 @@
 mod app;
 mod screen_capture;
 
-use app::AppInterface;
+use app::RustreamApp;
 use env_logger::Env;
 use log::LevelFilter;
 
@@ -27,6 +27,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         APP_TITLE,
         options,
-        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(AppInterface::new(cc)))),
+        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(RustreamApp::new(cc)))),
     )
 }
