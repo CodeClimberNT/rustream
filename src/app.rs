@@ -1,20 +1,21 @@
+use crate::screen_capture::ScreenCapture;
 
-use crate::capture_screen::{get_monitors, take_screenshot};
 // Importing all the necessary libraries
 // self -> import the module egui itself
-use eframe::egui::{self, CentralPanel, Color32, ComboBox, Context, FontId, RichText};
+use eframe::egui::{self, CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText};
 use log::debug;
-// use scrap::Display;
 
 #[derive(Default)]
 pub struct AppInterface {
-    selected_monitor: usize, // Index of the selected monitor
-    monitors: Vec<String>,   // List of monitors as strings for display in the menu
-    mode: PageView,          // Enum to track modes
+    // selected_monitor: usize,                  // Index of the selected monitor
+    screen_capturer: ScreenCapture, // List of monitors as strings for display in the menu
+    screen_texture: Option<egui::TextureHandle>, // Texture for the screen capture
+    placeholder_texture: Option<egui::TextureHandle>, // Texture for the screen capture
+    mode: PageView,                 // Enum to track modes
     // home_icon_path: &'static str, // Path for the home icon
     address_text: String, // Text input for the receiver mode
-
-    is_rendering_screenshot: bool,
+    is_rendering_screen: bool,
+    // home_icon: egui::TextureHandle,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -27,25 +28,28 @@ pub enum PageView {
 
 impl AppInterface {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Retrieve the list of monitors at initialization
-        let mut monitors_list = Vec::new();
-        if let Ok(displays) = get_monitors() {
-            for (i, _monitor) in displays.iter().enumerate() {
-                monitors_list.push(format!("Monitor {}", i));
-            }
-        }
+        // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
+        // Create a simple placeholder image (e.g., a solid color)
+        let placeholder_image = egui::ColorImage::new([1, 1], egui::Color32::GOLD);
 
+        // Load the placeholder texture
+        let placeholder_texture = cc.egui_ctx.load_texture(
+            "placeholder",
+            placeholder_image,
+            egui::TextureOptions::default(),
+        );
+        let screen_capture = ScreenCapture::default();
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
-        // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
 
         AppInterface {
-            selected_monitor: 0,
-            monitors: monitors_list,
+            screen_capturer: screen_capture,
+            screen_texture: None,
+            placeholder_texture: Some(placeholder_texture),
             mode: PageView::default(),
             // home_icon_path: svg_home_icon_path,
             address_text: String::new(),
-            is_rendering_screenshot: false,
+            is_rendering_screen: false,
         }
     }
 
@@ -53,13 +57,14 @@ impl AppInterface {
         ctx.screen_rect().width()
     }
 
-    // pub fn height(&self, ctx: &Context) -> f32 {
-    //     ctx.screen_rect().height()
-    // }
+    #[allow(dead_code)]
+    pub fn height(&self, ctx: &Context) -> f32 {
+        ctx.screen_rect().height()
+    }
 
     pub fn reset_ui(&mut self) {
         // Reset the application
-        self.selected_monitor = 0;
+        self.screen_capturer.reset();
         self.mode = PageView::default();
         self.address_text.clear();
     }
@@ -91,51 +96,69 @@ impl AppInterface {
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
 
-        ui.horizontal_centered(|ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-
-                // Toggle the rendering of the screenshot when the button is clicked and update the button text
-                self.is_rendering_screenshot ^= ui
-                    .button(if self.is_rendering_screenshot {
-                        "Stop Capture"
-                    } else {
-                        "Start Capture"
-                    })
-                    .clicked();
-
-
-                if self.is_rendering_screenshot {
-                    // take_screenshot(self.selected_monitor);
-                    let monitor_feedback = take_screenshot(0); // Capture the primary monitor (index 0)
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [
-                            monitor_feedback.width() as usize,
-                            monitor_feedback.height() as usize,
-                        ],
-                        &monitor_feedback,
-                    );
-                    let texture = ui.ctx().load_texture(
-                        "monitor_feedback",
-                        image,
-                        egui::TextureOptions::default(),
-                    );
-                    ui.add(egui::Image::new(&texture).max_width(self.width(ui.ctx()) / 1.5));
-
-                }
-            });
-        });
         ui.add_space(40.0);
 
-        ui.heading("Select Monitor");
+        ui.vertical_centered(|ui| {
+            let mut selected = self.screen_capturer.get_monitor_index();
 
-        ComboBox::from_label("Monitor")
-            .selected_text(format!("Monitor {}", self.selected_monitor))
-            .show_ui(ui, |ui| {
-                for (index, monitor) in self.monitors.iter().enumerate() {
-                    ui.selectable_value(&mut self.selected_monitor, index, monitor);
+            let current_monitor = selected;
+            ComboBox::from_label("Select Monitor")
+                .selected_text(format!("Monitor {}", current_monitor))
+                .show_ui(ui, |ui| {
+                    self.screen_capturer
+                        .get_monitors()
+                        .iter()
+                        .enumerate()
+                        .for_each(|(i, m)| {
+                            ui.selectable_value(&mut selected, i, m);
+                        });
+                });
+            if selected != current_monitor {
+                self.screen_capturer.set_monitor_index(selected);
+            }
+
+            // Toggle the rendering of the screenshot when the button is clicked and update the button text
+            self.is_rendering_screen ^= ui
+                .button(if self.is_rendering_screen {
+                    "Stop Capture"
+                } else {
+                    "Start Capture"
+                })
+                .clicked();
+
+            if self.is_rendering_screen {
+                // take_screenshot(self.selected_monitor);
+                if let Some(screen_image) = self.screen_capturer.capture_screen() {
+                    let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+                        [
+                            screen_image.width() as usize,
+                            screen_image.height() as usize,
+                        ],
+                        screen_image.as_flat_samples().as_slice(),
+                    );
+
+                    if let Some(ref mut texture) = self.screen_texture {
+                        // Update existing texture
+                        texture.set(image, egui::TextureOptions::default());
+                    } else {
+                        // Load texture for the first time
+                        self.screen_texture = Some(ui.ctx().load_texture(
+                            "screen_image",
+                            image,
+                            egui::TextureOptions::default(),
+                        ));
+                    }
                 }
-            });
+
+                let texture = self
+                    .screen_texture
+                    .as_ref()
+                    .unwrap_or(self.placeholder_texture.as_ref().unwrap());
+                ui.add(egui::Image::new(texture).max_width(self.width(ui.ctx()) / 1.5));
+            } else {
+                self.screen_texture = None;
+            }
+        });
     }
 
     pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
