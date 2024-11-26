@@ -1,10 +1,10 @@
-use image::{ImageBuffer, Rgba};
+use image::{GenericImageView, ImageBuffer, Rgba};
 use scrap::{Capturer, Display};
 
 pub struct ScreenCapture {
     pub selected_monitor: usize,
     pub monitors: Vec<String>,
-    pub captured_image: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    pub capture_area: Option<(u32, u32, u32, u32)>, // (x, y, width, height)
     capturer: Option<Capturer>,
     width: u32,
     height: u32,
@@ -22,7 +22,7 @@ impl Default for ScreenCapture {
         ScreenCapture {
             selected_monitor: 0,
             monitors: monitors_list,
-            captured_image: ImageBuffer::<Rgba<u8>, _>::new(1, 1),
+            capture_area: None,
             capturer: None, // Initialize capturer as None
             width: 0,
             height: 0,
@@ -45,6 +45,10 @@ impl ScreenCapture {
         &self.monitors
     }
 
+    pub fn set_capture_area(&mut self, x: u32, y: u32, width: u32, height: u32) {
+        self.capture_area = Some((x, y, width, height));
+    }
+
     pub fn capture_screen(&mut self) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
         if self.capturer.is_none() {
             let monitor = get_monitor_from_index(self.selected_monitor).unwrap();
@@ -62,7 +66,13 @@ impl ScreenCapture {
                 let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
                     ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(self.width, self.height, buffer)
                         .unwrap();
-                self.captured_image = image.clone();
+
+                if let Some((x, y, width, height)) = self.capture_area {
+                    let cropped_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                        image.view(x, y, width, height).to_image();
+                    log::debug!("Captured sub-area of {width}x{height} at ({x}, {y})");
+                    return Some(cropped_image);
+                }
                 log::debug!(
                     "Captured frame with dimensions {}x{}",
                     self.width,
