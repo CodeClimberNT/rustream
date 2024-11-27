@@ -1,10 +1,9 @@
-use image::{GenericImageView, ImageBuffer, Rgba};
+use image::{ImageBuffer, Rgba};
 use scrap::{Capturer, Display};
 
 pub struct ScreenCapture {
-    pub selected_monitor: usize,
-    pub monitors: Vec<String>,
-    pub capture_area: Option<(u32, u32, u32, u32)>, // (x, y, width, height)
+    selected_monitor: usize,
+    monitors: Vec<String>,
     capturer: Option<Capturer>,
     width: u32,
     height: u32,
@@ -20,10 +19,9 @@ impl Default for ScreenCapture {
         }
 
         ScreenCapture {
-            selected_monitor: 0,
             monitors: monitors_list,
-            capture_area: None,
-            capturer: None, // Initialize capturer as None
+            capturer: None,
+            selected_monitor: 0,
             width: 0,
             height: 0,
         }
@@ -37,16 +35,14 @@ impl ScreenCapture {
 
     pub fn set_monitor_index(&mut self, index: usize) {
         self.selected_monitor = index;
-        self.reset_capture();
+        self.capturer = None;
+        self.width = 0;
+        self.height = 0;
         log::info!("Selected monitor: {}", self.selected_monitor);
     }
 
     pub fn get_monitors(&self) -> &Vec<String> {
         &self.monitors
-    }
-
-    pub fn set_capture_area(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        self.capture_area = Some((x, y, width, height));
     }
 
     pub fn capture_screen(&mut self) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
@@ -67,12 +63,6 @@ impl ScreenCapture {
                     ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(self.width, self.height, buffer)
                         .unwrap();
 
-                if let Some((x, y, width, height)) = self.capture_area {
-                    let cropped_image: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                        image.view(x, y, width, height).to_image();
-                    log::debug!("Captured sub-area of {width}x{height} at ({x}, {y})");
-                    return Some(cropped_image);
-                }
                 log::debug!(
                     "Captured frame with dimensions {}x{}",
                     self.width,
@@ -91,16 +81,6 @@ impl ScreenCapture {
                 }
             },
         };
-    }
-
-    pub fn reset(&mut self) {
-        self.selected_monitor = 0;
-        self.reset_capture();
-    }
-    pub fn reset_capture(&mut self) {
-        self.capturer = None;
-        self.width = 0;
-        self.height = 0;
     }
 }
 

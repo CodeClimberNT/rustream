@@ -1,22 +1,31 @@
-use crate::screen_capture::ScreenCapture;
+use std::collections::HashMap;
 
-// Importing all the necessary libraries
-// self -> import the module egui itself
 use eframe::egui;
-use egui::{CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, RichText, TextureHandle};
+use egui::{
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
+    TextureHandle,
+};
+
+use crate::screen_capture::ScreenCapture;
+use image::{GenericImageView, ImageBuffer, Rgba};
 use log::debug;
 
+const NUM_TEXTURES: usize = 3;
+
+#[derive(Default)]
 pub struct RustreamApp {
-    screen_capturer: ScreenCapture, // List of monitors as strings for display in the menu
-    mode: PageView,                 // Enum to track modes
-    // Texture
-    screen_texture: Option<TextureHandle>, // Texture for the screen capture
-    error_texture: TextureHandle,          // Texture for the screen capture
-    home_icon_texture: TextureHandle,
-    quit_icon_texture: TextureHandle,
-    address_text: String, // Text input for the receiver mode
-    is_rendering_screen: bool,
+    recorder: ScreenCapture, // List of monitors as strings for display in the menu
+    page: PageView,          // Enum to track modes
+    display_texture: Option<TextureHandle>, // Texture for the screen capture
+    textures: HashMap<String, TextureHandle>, // List of textures
+    cropped_image: Option<ImageBuffer<Rgba<u8>, Vec<u8>>>, // Cropped image to send
+    address_text: String,    // Text input for the receiver mode
+    preview_active: bool,
     should_quit: bool,
+    is_selecting: bool,
+    drag_start: Option<Pos2>,
+    capture_area: Option<(u32, u32, u32, u32)>,
+    new_capture_area: Option<Rect>,
 }
 
 #[derive(Default, Debug)]
@@ -29,69 +38,79 @@ pub enum PageView {
 
 impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // let svg_home_icon_path: &'static str = "../assets/icons/home.svg";
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
-
-        let error_icon_texture = RustreamApp::load_texture(
+        let mut textures = HashMap::with_capacity(NUM_TEXTURES);
+        RustreamApp::add_texture_to_map(
+            &mut textures,
             ctx,
-            "error_icon",
+            "error",
             include_bytes!("../assets/icons/error.svg"),
-            None,
             None,
         );
 
-        let home_icon_texture = RustreamApp::load_texture(
+        RustreamApp::add_texture_to_map(
+            &mut textures,
             ctx,
             "home_icon",
             include_bytes!("../assets/icons/home.svg"),
-            Some(&error_icon_texture),
             None,
         );
-        let quit_icon_texture = RustreamApp::load_texture(
+
+        RustreamApp::add_texture_to_map(
+            &mut textures,
             ctx,
             "quit_icon",
             include_bytes!("../assets/icons/quit.svg"),
-            Some(&error_icon_texture),
             None,
         );
 
-        let screen_capture = ScreenCapture::default();
+        assert_eq!(
+            textures.len(),
+            NUM_TEXTURES,
+            r"Numbers of Textures Declared: {} | Actual number of textures: {}, 
+            Check: 
+                1. If the `NUM_TEXTURES` is correct
+                2. If the texture name is unique
+                3. Try again and pray to the Rust gods",
+            NUM_TEXTURES,
+            textures.len()
+        );
 
         RustreamApp {
-            screen_capturer: screen_capture,
-            screen_texture: None,
-            error_texture: error_icon_texture,
-            mode: PageView::default(),
-            address_text: String::new(),
-            is_rendering_screen: false,
-            home_icon_texture,
-            quit_icon_texture,
-            should_quit: false,
+            textures,
+            ..Default::default()
         }
     }
 
-    pub fn width(&self, ctx: &Context) -> f32 {
-        ctx.screen_rect().width()
+    fn get_preview_rect(&self, ui: &egui::Ui) -> Rect {
+        // Adjust this based on how your preview is laid out
+        // For example, occupy the full available space
+        ui.available_rect_before_wrap()
     }
 
-    #[allow(dead_code)]
-    pub fn height(&self, ctx: &Context) -> f32 {
-        ctx.screen_rect().height()
-    }
+    // #[allow(dead_code)]
+    // fn width(&self, ctx: &Context) -> f32 {
+    //     ctx.screen_rect().width()
+    // }
 
-    pub fn reset_ui(&mut self) {
+    // #[allow(dead_code)]
+    // fn height(&self, ctx: &Context) -> f32 {
+    //     ctx.screen_rect().height()
+    // }
+
+    fn reset_ui(&mut self) {
         // Reset the application
-        self.screen_capturer.reset();
-        self.mode = PageView::default();
+        self.recorder = ScreenCapture::default();
+        self.page = PageView::default();
         self.address_text.clear();
     }
 
-    pub fn set_mode(&mut self, mode: PageView) {
-        self.mode = mode;
+    fn set_mode(&mut self, mode: PageView) {
+        self.page = mode;
     }
 
-    pub fn render_home_page(&mut self, ui: &mut egui::Ui) {
+    fn home_page(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
@@ -109,21 +128,20 @@ impl RustreamApp {
         });
     }
 
-    pub fn render_sender_page(&mut self, ui: &mut egui::Ui) {
-        // TODO: better screen recording method than taking a screenshot
+    fn render_sender_page(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
 
         ui.add_space(40.0);
 
         ui.vertical_centered(|ui| {
-            let mut selected = self.screen_capturer.get_monitor_index();
-
+            let mut selected = self.recorder.get_monitor_index();
+            // let ctx: &Context = ui.ctx();
             let current_monitor = selected;
             ComboBox::from_label("Select Monitor")
                 .selected_text(format!("Monitor {}", current_monitor))
                 .show_ui(ui, |ui| {
-                    self.screen_capturer
+                    self.recorder
                         .get_monitors()
                         .iter()
                         .enumerate()
@@ -132,22 +150,85 @@ impl RustreamApp {
                         });
                 });
             if selected != current_monitor {
-                self.screen_capturer.set_monitor_index(selected);
+                self.recorder.set_monitor_index(selected);
             }
 
-            // Toggle the rendering of the screenshot when the button is clicked and update the button text
-            self.is_rendering_screen ^= ui
-                .button(if self.is_rendering_screen {
-                    "Stop Capture"
+            // TODO: Select capture area
+            // if self.preview_active {
+            //     self.is_selecting ^= ui.button("Select Capture Area").clicked();
+            // }
+
+            if self.is_selecting {
+                // TODO: Select capture area
+                // display a rectangle to show the selected area
+                let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
+
+                if response.drag_started() {
+                    self.drag_start = Some(response.interact_pointer_pos().unwrap());
+                }
+
+                if let Some(start) = self.drag_start {
+                    if let Some(current) = response.interact_pointer_pos() {
+                        self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                        // Draw the selection rectangle
+                        if let Some(rect) = self.new_capture_area {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                0.0,
+                                egui::Stroke::new(2.0, egui::Color32::GREEN),
+                            );
+                        }
+                    }
+                }
+
+                // OK button to confirm selection
+                if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                    self.capture_area = (
+                        self.new_capture_area.unwrap().min.x as u32,
+                        self.new_capture_area.unwrap().min.y as u32,
+                        self.new_capture_area.unwrap().width() as u32,
+                        self.new_capture_area.unwrap().height() as u32,
+                    )
+                        .into();
+                    log::debug!(
+                        "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                        self.capture_area.unwrap().0,
+                        self.capture_area.unwrap().1,
+                        self.capture_area.unwrap().2,
+                        self.capture_area.unwrap().3
+                    );
+                    self.is_selecting = false;
+                    self.drag_start = None;
+                    self.new_capture_area = None;
+                }
+                // Cancel selection
+                if ui.button("Cancel").clicked() {
+                    self.is_selecting = false;
+                    self.new_capture_area = None;
+                    self.drag_start = None;
+                }
+            }
+
+            // TODO: Select capture area
+            // Disable the preview button if the user is not selecting the capture area
+            // if !self.is_selecting {
+            self.preview_active ^= ui
+                .button(if self.preview_active {
+                    "Stop Preview Screen"
                 } else {
-                    "Start Capture"
+                    "Start Preview Screen"
                 })
                 .clicked();
+            // }
 
-            if self.is_rendering_screen {
-                // take_screenshot(self.selected_monitor);
-                if let Some(screen_image) = self.screen_capturer.capture_screen() {
-                    let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+            if self.preview_active {
+                if let Some(screen_image) = self.recorder.capture_screen() {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
                         [
                             screen_image.width() as usize,
                             screen_image.height() as usize,
@@ -155,75 +236,103 @@ impl RustreamApp {
                         screen_image.as_flat_samples().as_slice(),
                     );
 
-                    if let Some(ref mut texture) = self.screen_texture {
-                        // Update existing texture
+                    // If capture_area is defined, create a cropped image for network sending
+                    if let Some((x, y, width, height)) = self.capture_area {
+                        let cropped_screen = screen_image.view(x, y, width, height).to_image();
+
+                        // Store or process `cropped_screen` as needed
+                        // For example, you can store it in a new field `self.cropped_image`
+                        self.cropped_image = Some(cropped_screen);
+                    }
+
+                    // Render preview screen
+                    if let Some(ref mut texture) = self.display_texture {
                         texture.set(image, egui::TextureOptions::default());
                     } else {
                         // Load texture for the first time
-                        self.screen_texture = Some(ui.ctx().load_texture(
-                            "screen_image",
+                        self.display_texture = Some(ctx.load_texture(
+                            "display_texture",
                             image,
                             egui::TextureOptions::default(),
                         ));
                     }
                 }
 
-                let texture = self.screen_texture.as_ref().unwrap_or(&self.error_texture);
-                ui.add(egui::Image::new(texture).max_width(self.width(ui.ctx()) / 1.5));
+                let texture = self
+                    .display_texture
+                    .as_ref()
+                    .unwrap_or(self.textures.get("error").unwrap());
+                ui.add(egui::Image::new(texture).max_size(self.get_preview_rect(ui).size()));
             } else {
-                self.screen_texture = None;
+                self.display_texture = None;
             }
         });
     }
 
     pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
+        ui.disable();
         ui.heading("Receiver Mode");
         ui.vertical_centered(|ui| {
             ui.label("Enter the Sender's IP Address");
-            if ui.text_edit_singleline(&mut self.address_text).lost_focus() {
-                ui.label(format!("Address:{}", self.address_text.clone()));
+            if ui
+                .text_edit_singleline(&mut self.address_text)
+                .on_disabled_hover_text("NOT IMPLEMENTED")
+                .lost_focus()
+            {
+                ui.label(format!("Address:{}", self.address_text));
                 debug!("Address: {}", self.address_text);
             }
         });
         ui.button("Connect")
-            .on_hover_text("NOT IMPLEMENTED")
+            .on_disabled_hover_text("NOT IMPLEMENTED")
             .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
 
-    /// Utility function to load a texture from image bytes.
-    /// If loading fails, it returns the provided error_texture.
-    ///
+    /// Add a texture to the texture map
+    /// If the texture fails to load, an error texture is loaded instead
+    /// The error texture is a red square
+    /// The error texture is loaded only once and is reused for all errors
     /// # Arguments
+    /// * `textures` - A mutable reference to the texture map
+    /// * `ctx` - A reference to the egui context
+    /// * `name` - The name of the texture
+    /// * `img_bytes` - The bytes of the image to load
+    /// * `texture_options` - Optional texture options
     ///
-    /// * `ctx` - A reference to egui::Context.
-    /// * `name` - The unique name for the texture.
-    /// * `img_bytes` - The image data as a byte slice.
-    /// * `error_texture` - A reference to the fallback error texture.
+    /// # Panics
+    /// If the error texture is not found
     ///
-    /// # Returns
-    ///
-    /// * `TextureHandle` - The loaded texture or the error texture if loading fails.
-    fn load_texture(
+    /// # Example
+    /// ```rust
+    /// let mut textures = HashMap::new();
+    /// let ctx = egui::Context::new();
+    /// let img_bytes = include_bytes!("../assets/icons/home.svg");
+    /// add_texture_to_map(&mut textures, &ctx, "home_icon", img_bytes, None);
+    /// ```
+
+    fn add_texture_to_map(
+        textures: &mut HashMap<String, TextureHandle>,
         ctx: &Context,
         name: &str,
         img_bytes: &[u8],
-        error_texture: Option<&TextureHandle>,
         texture_options: Option<egui::TextureOptions>,
-    ) -> TextureHandle {
-        let image = match egui_extras::image::load_svg_bytes(img_bytes) {
+    ) {
+        let image: ColorImage = match egui_extras::image::load_svg_bytes(img_bytes) {
             Ok(img) => img,
             Err(e) => {
-                log::error!("Failed to load image: {}", e);
-                if let Some(error_texture) = error_texture {
-                    return error_texture.clone();
+                log::warn!("Failed to load image: {}", e);
+                if let Some(error_texture) = textures.get("error") {
+                    textures.insert(name.to_string(), error_texture.clone());
+                    return;
                 } else {
-                    log::error!("Error Texture not found. Loading RED SQUARE as error texture");
+                    log::warn!("Error Texture not found. Loading RED SQUARE as error texture");
                     ColorImage::new([50, 50], egui::Color32::RED)
                 }
             }
         };
 
-        ctx.load_texture(name, image, texture_options.unwrap_or_default())
+        let texture = ctx.load_texture(name, image, texture_options.unwrap_or_default());
+        textures.insert(name.to_string(), texture.clone());
     }
 }
 
@@ -243,7 +352,10 @@ impl eframe::App for RustreamApp {
                     if ui
                         .add_sized(
                             [80., 30.],
-                            egui::Button::image_and_text(&self.home_icon_texture, "Home"),
+                            egui::Button::image_and_text(
+                                &self.textures.get("home_icon").unwrap().clone(),
+                                "Home",
+                            ),
                         )
                         .clicked()
                     {
@@ -254,7 +366,10 @@ impl eframe::App for RustreamApp {
                     if ui
                         .add_sized(
                             [80., 30.],
-                            egui::Button::image_and_text(&self.quit_icon_texture, "Quit"),
+                            egui::Button::image_and_text(
+                                &self.textures.get("quit_icon").unwrap().clone(),
+                                "Quit",
+                            ),
                         )
                         .clicked()
                     {
@@ -273,13 +388,17 @@ impl eframe::App for RustreamApp {
             ui.separator();
             ui.add_space(20.0);
 
-            match self.mode {
-                PageView::HomePage => self.render_home_page(ui),
+            match self.page {
+                PageView::HomePage => self.home_page(ui),
 
-                PageView::Sender => self.render_sender_page(ui),
+                PageView::Sender => self.render_sender_page(ui, ctx),
 
                 PageView::Receiver => self.render_receiver_mode(ui),
             }
         });
     }
+
+    // fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+    //     egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.0).to_array()
+    // }
 }
