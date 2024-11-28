@@ -32,7 +32,7 @@ pub struct RustreamApp {
 pub enum PageView {
     #[default]
     HomePage,
-    Sender,
+    Caster,
     Receiver,
 }
 
@@ -116,7 +116,7 @@ impl RustreamApp {
                 ui.add_space(80.0);
 
                 if ui.button("CAST NEW STREAMING").clicked() {
-                    self.set_mode(PageView::Sender);
+                    self.set_mode(PageView::Caster);
                 }
 
                 ui.add_space(30.0);
@@ -139,7 +139,7 @@ impl RustreamApp {
             // let ctx: &Context = ui.ctx();
             let current_monitor = selected;
             ComboBox::from_label("Select Monitor")
-                .selected_text(format!("Monitor {}", current_monitor))
+                .selected_text(format!("Monitor {}", selected))
                 .show_ui(ui, |ui| {
                     self.recorder
                         .get_monitors()
@@ -154,9 +154,9 @@ impl RustreamApp {
             }
 
             // TODO: Select capture area
-            // if self.preview_active {
-            //     self.is_selecting ^= ui.button("Select Capture Area").clicked();
-            // }
+            if self.preview_active {
+                self.is_selecting ^= ui.button("Select Capture Area").clicked();
+            }
 
             if self.is_selecting {
                 // TODO: Select capture area
@@ -391,7 +391,7 @@ impl eframe::App for RustreamApp {
             match self.page {
                 PageView::HomePage => self.home_page(ui),
 
-                PageView::Sender => self.render_sender_page(ui, ctx),
+                PageView::Caster => self.render_sender_page(ui, ctx),
 
                 PageView::Receiver => self.render_receiver_mode(ui),
             }

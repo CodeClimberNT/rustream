@@ -40,6 +40,11 @@ impl ScreenCapture {
         self.height = 0;
         log::info!("Selected monitor: {}", self.selected_monitor);
     }
+    pub fn reset_capture(&mut self) {
+        self.capturer = None;
+        self.width = 0;
+        self.height = 0;
+    }
 
     pub fn get_monitors(&self) -> &Vec<String> {
         &self.monitors
@@ -50,6 +55,7 @@ impl ScreenCapture {
             let monitor = get_monitor_from_index(self.selected_monitor).unwrap();
             self.height = monitor.height() as u32;
             self.width = monitor.width() as u32;
+            log::debug!("Monitor dimensions: {}x{}", self.width, self.height);
             self.capturer = Some(Capturer::new(monitor).expect("Couldn't begin capture."));
         }
 
@@ -75,6 +81,13 @@ impl ScreenCapture {
                     log::debug!("Frame not ready; skipping this frame.");
                     None
                 }
+                std::io::ErrorKind::ConnectionReset => {
+                    // TODO: Fix 16:9 ratio issue
+                    log::debug!("Strange Error: {e}. Resetting capturer. Make sure that if you changed your screen size, keep it at 16:9 ratio.");
+                    self.reset_capture();
+
+                    None
+                }
                 _ => {
                     log::error!("{e:?}");
                     None
@@ -85,6 +98,11 @@ impl ScreenCapture {
 }
 
 fn bgra_to_rgba(buffer: &mut [u8]) -> &mut [u8] {
+    assert_eq!(
+        buffer.len() % 4,
+        0,
+        "Buffer length must be a multiple of 4."
+    );
     for chunk in buffer.chunks_exact_mut(4) {
         chunk.swap(0, 2); // Swap B and R
     }

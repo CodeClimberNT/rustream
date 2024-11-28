@@ -13,9 +13,8 @@ use log::LevelFilter;
 const APP_TITLE: &str = "RUSTREAM";
 
 fn main() {
-    // env_logger::init();
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
-        .filter_module("eframe", LevelFilter::Info)
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+        .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)
         .filter_module("egui_wgpu", LevelFilter::Off)
