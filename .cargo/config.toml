@@ -5,16 +5,8 @@ brt = "build --release --timings"
 
 
 [build]
-target = [
-    "x86_64-pc-windows-msvc",
-    # "x86_64-unknown-linux-gnu",
-    # "x86_64-apple-darwin",
-    # "aarch64-apple-darwin",
-]
 jobs = -1
 
-[target.x86_64-unknown-linux-gnu]
-linker = "rust-lld"
 
 
 [env]

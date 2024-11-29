@@ -1,4 +1,9 @@
+use crate::config::Config;
+use crate::screen_capture::{CapturedFrame, FrameGrabber};
+use crate::video_recorder::VideoRecorder;
+
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
@@ -6,20 +11,20 @@ use egui::{
     TextureHandle,
 };
 
-use crate::screen_capture::ScreenCapture;
-use image::{GenericImageView, ImageBuffer, Rgba};
 use log::debug;
 
 const NUM_TEXTURES: usize = 3;
 
 #[derive(Default)]
 pub struct RustreamApp {
-    recorder: ScreenCapture, // List of monitors as strings for display in the menu
-    page: PageView,          // Enum to track modes
-    display_texture: Option<TextureHandle>, // Texture for the screen capture
+    config: Arc<Mutex<Config>>, // Wrap in Mutex for interior mutability
+    frame_grabber: FrameGrabber,
+    video_recorder: VideoRecorder,
+    page: PageView,                           // Enum to track modes
+    display_texture: Option<TextureHandle>,   // Texture for the screen capture
     textures: HashMap<String, TextureHandle>, // List of textures
-    cropped_image: Option<ImageBuffer<Rgba<u8>, Vec<u8>>>, // Cropped image to send
-    address_text: String,    // Text input for the receiver mode
+    cropped_frame: Option<CapturedFrame>,     // Cropped image to send
+    address_text: String,                     // Text input for the receiver mode
     preview_active: bool,
     should_quit: bool,
     is_selecting: bool,
@@ -40,6 +45,7 @@ impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
+
         let mut textures = HashMap::with_capacity(NUM_TEXTURES);
         RustreamApp::add_texture_to_map(
             &mut textures,
@@ -77,37 +83,34 @@ impl RustreamApp {
             textures.len()
         );
 
+        let config = Arc::new(Mutex::new(Config::default()));
+        let frame_grabber = FrameGrabber::new(config.clone());
+        let video_recorder = VideoRecorder::new(config.clone());
+
         RustreamApp {
+            config,
+            frame_grabber,
+            video_recorder,
             textures,
             ..Default::default()
         }
     }
 
-    fn get_preview_rect(&self, ui: &egui::Ui) -> Rect {
+    fn get_preview_screen_rect(&self, ui: &egui::Ui) -> Rect {
         // Adjust this based on how your preview is laid out
         // For example, occupy the full available space
         ui.available_rect_before_wrap()
     }
 
-    // #[allow(dead_code)]
-    // fn width(&self, ctx: &Context) -> f32 {
-    //     ctx.screen_rect().width()
-    // }
-
-    // #[allow(dead_code)]
-    // fn height(&self, ctx: &Context) -> f32 {
-    //     ctx.screen_rect().height()
-    // }
-
     fn reset_ui(&mut self) {
         // Reset the application
-        self.recorder = ScreenCapture::default();
+        self.frame_grabber = FrameGrabber::new(self.config.clone());
         self.page = PageView::default();
         self.address_text.clear();
     }
 
-    fn set_mode(&mut self, mode: PageView) {
-        self.page = mode;
+    fn set_page(&mut self, page: PageView) {
+        self.page = page;
     }
 
     fn home_page(&mut self, ui: &mut egui::Ui) {
@@ -116,53 +119,55 @@ impl RustreamApp {
                 ui.add_space(80.0);
 
                 if ui.button("CAST NEW STREAMING").clicked() {
-                    self.set_mode(PageView::Caster);
+                    self.set_page(PageView::Caster);
                 }
 
                 ui.add_space(30.0);
 
                 if ui.button("VIEW STREAMING").clicked() {
-                    self.set_mode(PageView::Receiver);
+                    self.set_page(PageView::Receiver);
                 }
             });
         });
     }
 
-    fn render_sender_page(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+    fn render_caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
 
         ui.add_space(40.0);
 
         ui.vertical_centered(|ui| {
-            let mut selected = self.recorder.get_monitor_index();
-            // let ctx: &Context = ui.ctx();
-            let current_monitor = selected;
+            let mut selected_monitor_index = self.frame_grabber.get_monitor_index();
             ComboBox::from_label("Select Monitor")
-                .selected_text(format!("Monitor {}", selected))
+                .selected_text(format!("Monitor {}", selected_monitor_index))
                 .show_ui(ui, |ui| {
-                    self.recorder
+                    self.frame_grabber
                         .get_monitors()
                         .iter()
                         .enumerate()
                         .for_each(|(i, m)| {
-                            ui.selectable_value(&mut selected, i, m);
+                            ui.selectable_value(&mut selected_monitor_index, i, m);
                         });
                 });
-            if selected != current_monitor {
-                self.recorder.set_monitor_index(selected);
+
+            if selected_monitor_index != self.frame_grabber.get_monitor_index() {
+                self.frame_grabber.set_monitor_index(selected_monitor_index);
             }
 
             // TODO: Select capture area
             if self.preview_active {
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
+                if self.is_selecting {
+                    // Save current window size
+                }
             }
-
             if self.is_selecting {
                 // TODO: Select capture area
                 // display a rectangle to show the selected area
                 let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
 
+                // display a rectangle to show the selected area
                 if response.drag_started() {
                     self.drag_start = Some(response.interact_pointer_pos().unwrap());
                 }
@@ -214,7 +219,14 @@ impl RustreamApp {
                 }
             }
 
+            // Update capture area in config when it changes
+            if let Some(area) = self.capture_area {
+                let mut config = self.config.lock().unwrap();
+                config.capture.capture_area = Some(area);
+            }
+
             // TODO: Select capture area
+            // Disable the preview button if the user is not selecting the capture area
             // Disable the preview button if the user is not selecting the capture area
             // if !self.is_selecting {
             self.preview_active ^= ui
@@ -227,29 +239,40 @@ impl RustreamApp {
             // }
 
             if self.preview_active {
-                if let Some(screen_image) = self.recorder.capture_screen() {
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [
-                            screen_image.width() as usize,
-                            screen_image.height() as usize,
-                        ],
-                        screen_image.as_flat_samples().as_slice(),
-                    );
+                if let Some(screen_image) = self.frame_grabber.capture_frame() {
+                    let image: ColorImage = if let Some((x, y, width, height)) = self.capture_area {
+                        // Apply cropping if we have a capture area
+                        if let Some(cropped) = screen_image.view(x, y, width, height) {
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [cropped.width as usize, cropped.height as usize],
+                                &cropped.rgba_data, // Changed from frame_data to rgba_data
+                            )
+                        } else {
+                            // Fallback to full image if crop parameters are invalid
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [screen_image.width as usize, screen_image.height as usize],
+                                &screen_image.rgba_data, // Changed from frame_data to rgba_data
+                            )
+                        }
+                    } else {
+                        // No crop area selected, show full image
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [screen_image.width as usize, screen_image.height as usize],
+                            &screen_image.rgba_data, // Changed from frame_data to rgba_data
+                        )
+                    };
 
-                    // If capture_area is defined, create a cropped image for network sending
-                    if let Some((x, y, width, height)) = self.capture_area {
-                        let cropped_screen = screen_image.view(x, y, width, height).to_image();
+                    // Store the active frame for network transmission if needed
+                    self.cropped_frame = if let Some((x, y, width, height)) = self.capture_area {
+                        screen_image.view(x, y, width, height)
+                    } else {
+                        Some(screen_image)
+                    };
 
-                        // Store or process `cropped_screen` as needed
-                        // For example, you can store it in a new field `self.cropped_image`
-                        self.cropped_image = Some(cropped_screen);
-                    }
-
-                    // Render preview screen
+                    // Update texture
                     if let Some(ref mut texture) = self.display_texture {
                         texture.set(image, egui::TextureOptions::default());
                     } else {
-                        // Load texture for the first time
                         self.display_texture = Some(ctx.load_texture(
                             "display_texture",
                             image,
@@ -262,9 +285,64 @@ impl RustreamApp {
                     .display_texture
                     .as_ref()
                     .unwrap_or(self.textures.get("error").unwrap());
-                ui.add(egui::Image::new(texture).max_size(self.get_preview_rect(ui).size()));
+                ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
             } else {
                 self.display_texture = None;
+                self.cropped_frame = None;
+            }
+
+            // Add recording controls
+            ui.horizontal(|ui| {
+                if self.video_recorder.is_recording() {
+                    if ui.button("⏹ Stop Recording").clicked() && self.video_recorder.stop() {
+                        debug!("Recording stopped and saved successfully");
+                    }
+                } else if ui.button("⏺ Start Recording").clicked() {
+                    self.video_recorder.start();
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Output path:");
+                let mut recording_path = self
+                    .config
+                    .lock()
+                    .unwrap()
+                    .video
+                    .output_path
+                    .to_string_lossy()
+                    .into_owned();
+                // ? Beware: if the path use unicode characters, it may not be displayed correctly
+                ui.text_edit_singleline(&mut recording_path)
+                    // Show a tooltip with the full path when hovering over the text field (useful if it's too long)
+                    .on_hover_text(recording_path);
+                if ui.button("📂 Browse").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("Save recording as...")
+                        .set_file_name("recording.mp4")
+                        .add_filter("MP4 video", &["mp4"])
+                        .save_file()
+                    {
+                        let mut config = self.config.lock().unwrap();
+                        config.video.output_path = path;
+                    }
+                }
+            });
+
+            {
+                let mut config = self.config.lock().unwrap();
+                ui.add(
+                    egui::DragValue::new(&mut config.video.fps)
+                        .range(1..=60)
+                        .suffix(" FPS"),
+                );
+            }
+
+            // Record frame if we're recording
+            if self.video_recorder.is_recording() {
+                if let Some(frame) = self.cropped_frame.as_ref() {
+                    self.video_recorder.record_frame(frame);
+                }
             }
         });
     }
@@ -309,7 +387,6 @@ impl RustreamApp {
     /// let img_bytes = include_bytes!("../assets/icons/home.svg");
     /// add_texture_to_map(&mut textures, &ctx, "home_icon", img_bytes, None);
     /// ```
-
     fn add_texture_to_map(
         textures: &mut HashMap<String, TextureHandle>,
         ctx: &Context,
@@ -337,7 +414,7 @@ impl RustreamApp {
 }
 
 impl eframe::App for RustreamApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         if self.should_quit {
             // Spawn a new thread to send the close command to the egui context
             let ctx = ctx.clone();
@@ -354,7 +431,7 @@ impl eframe::App for RustreamApp {
                             [80., 30.],
                             egui::Button::image_and_text(
                                 &self.textures.get("home_icon").unwrap().clone(),
-                                "Home",
+                                "🏠 Home",
                             ),
                         )
                         .clicked()
@@ -368,7 +445,7 @@ impl eframe::App for RustreamApp {
                             [80., 30.],
                             egui::Button::image_and_text(
                                 &self.textures.get("quit_icon").unwrap().clone(),
-                                "Quit",
+                                "🚪 Quit",
                             ),
                         )
                         .clicked()
@@ -391,14 +468,10 @@ impl eframe::App for RustreamApp {
             match self.page {
                 PageView::HomePage => self.home_page(ui),
 
-                PageView::Caster => self.render_sender_page(ui, ctx),
+                PageView::Caster => self.render_caster_page(ui, ctx, frame),
 
                 PageView::Receiver => self.render_receiver_mode(ui),
             }
         });
     }
-
-    // fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-    //     egui::Rgba::from_rgba_premultiplied(0.0, 0.0, 0.0, 0.0).to_array()
-    // }
 }

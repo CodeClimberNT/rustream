@@ -3,10 +3,14 @@
 
 // mod annotation;
 mod app;
+// mod overlay;
+mod audio_capture;
+mod config;
 mod screen_capture;
+mod video_recorder;
 
 use app::RustreamApp;
-use egui::ViewportBuilder;
+use egui::{ViewportBuilder, X11WindowType};
 use env_logger::Env;
 use log::LevelFilter;
 
@@ -24,7 +28,9 @@ fn main() {
     let options: eframe::NativeOptions = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: ViewportBuilder {
+            transparent: Some(true),
             title: Some(APP_TITLE.to_string()),
+            window_type: Option::from(X11WindowType::Toolbar),
             ..Default::default()
         },
         ..Default::default()
