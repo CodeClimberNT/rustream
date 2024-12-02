@@ -1,3 +1,6 @@
+use crate::config::Config;
+use crate::frame_grabber::CapturedFrame;
+
 use std::{
     path::PathBuf,
     process::Command,
@@ -8,8 +11,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::config::Config;
-use crate::screen_capture::CapturedFrame;
+use hound::{WavSpec, WavWriter};
 use image::{ImageBuffer, RgbaImage};
 
 pub struct VideoRecorder {
@@ -17,6 +19,8 @@ pub struct VideoRecorder {
     is_recording: Arc<AtomicBool>,
     frame_writer_handle: Option<JoinHandle<()>>,
     frame_counter: usize,
+    audio_buffer: Vec<f32>,
+    audio_file: Option<PathBuf>,
 }
 
 impl Default for VideoRecorder {
@@ -35,11 +39,9 @@ impl VideoRecorder {
             is_recording: Arc::new(AtomicBool::new(false)),
             frame_writer_handle: None,
             frame_counter: 0,
+            audio_buffer: Vec::new(),
+            audio_file: None,
         }
-    }
-
-    pub fn set_config(&mut self, config: Arc<Mutex<Config>>) {
-        self.config = config;
     }
 
     pub fn start(&mut self) {
@@ -85,6 +87,13 @@ impl VideoRecorder {
         handle.join().ok();
     }
 
+    pub fn record_audio(&mut self, audio_data: &[f32]) {
+        if !self.is_recording.load(Ordering::SeqCst) {
+            return;
+        }
+        self.audio_buffer.extend_from_slice(audio_data);
+    }
+
     pub fn stop(&mut self) -> bool {
         if !self.is_recording.load(Ordering::SeqCst) {
             return false;
@@ -99,27 +108,67 @@ impl VideoRecorder {
         }
 
         // Generate the video using ffmpeg
-        self.generate_video()
+        let result = self.generate_video();
+        self.audio_buffer.clear();
+        self.audio_file = None;
+        result
     }
 
-    fn generate_video(&self) -> bool {
+    fn generate_video(&mut self) -> bool {
         let config = self.config.lock().unwrap().video.clone();
-        let status = Command::new("ffmpeg")
-            .arg("-y") // Overwrite output file if it exists
-            .arg("-framerate")
-            .arg(self.get_fps().to_string())
-            .arg("-i")
-            .arg(config.temp_dir.join("frame_%06d.png"))
-            .arg("-c:v")
-            .arg("libx264")
-            .arg("-pix_fmt")
-            .arg("yuv420p")
-            .arg("-preset")
-            .arg("medium")
-            .arg("-crf")
-            .arg("23")
-            .arg(self.get_output_path())
-            .status();
+
+        // Write audio to WAV file if we have audio data
+        if !self.audio_buffer.is_empty() {
+            let audio_file = config.temp_dir.join("audio.wav");
+            if let Err(e) = self.save_audio_to_wav(&audio_file) {
+                log::error!("Failed to save audio: {}", e);
+            } else {
+                self.audio_file = Some(audio_file);
+            }
+        }
+
+        let status = if let Some(audio_file) = &self.audio_file {
+            // TODO: Fix missing audio
+            log::debug!("Generating video with audio");
+            Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-framerate")
+                .arg(self.get_fps().to_string())
+                .arg("-i")
+                .arg(config.temp_dir.join("frame_%06d.png"))
+                .arg("-i")
+                .arg(audio_file)
+                .arg("-c:v")
+                .arg("libx264")
+                .arg("-c:a")
+                .arg("aac")
+                .arg("-pix_fmt")
+                .arg("yuv420p")
+                .arg("-preset")
+                .arg("medium")
+                .arg("-crf")
+                .arg("23")
+                .arg(self.get_output_path())
+                .status()
+        } else {
+            log::debug!("Generating video without audio");
+            Command::new("ffmpeg")
+                .arg("-y") // Overwrite output file if it exists
+                .arg("-framerate")
+                .arg(self.get_fps().to_string())
+                .arg("-i")
+                .arg(config.temp_dir.join("frame_%06d.png"))
+                .arg("-c:v")
+                .arg("libx264")
+                .arg("-pix_fmt")
+                .arg("yuv420p")
+                .arg("-preset")
+                .arg("medium")
+                .arg("-crf")
+                .arg("23")
+                .arg(self.get_output_path())
+                .status()
+        };
 
         match status {
             Ok(exit_status) if exit_status.success() => {
@@ -144,6 +193,22 @@ impl VideoRecorder {
                 false
             }
         }
+    }
+
+    fn save_audio_to_wav(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 48000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+
+        let mut writer = WavWriter::create(path, spec)?;
+        for sample in &self.audio_buffer {
+            writer.write_sample(*sample)?;
+        }
+        writer.finalize()?;
+        Ok(())
     }
 
     fn get_output_path(&self) -> PathBuf {

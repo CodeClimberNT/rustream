@@ -1,12 +1,11 @@
 // https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-// mod annotation;
 mod app;
-// mod overlay;
 mod audio_capture;
+mod common;
 mod config;
-mod screen_capture;
+mod frame_grabber;
 mod video_recorder;
 
 use app::RustreamApp;
@@ -17,11 +16,12 @@ use log::LevelFilter;
 const APP_TITLE: &str = "RUSTREAM";
 
 fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)
         .filter_module("egui_wgpu", LevelFilter::Off)
+        .filter_module("resvg", LevelFilter::Off)
         .init();
 
     // make the options easier to change

@@ -1,5 +1,6 @@
 use crate::audio_capture::AudioCapture;
 use crate::config::Config;
+use image::{GenericImageView, ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -14,39 +15,31 @@ pub struct CapturedFrame {
 }
 
 impl CapturedFrame {
-    fn from_bgra(width: u32, height: u32, mut bgra_data: Vec<u8>) -> Self {
+    fn from_bgra(width: u32, height: u32, mut bgra_buffer: RgbaImage) -> Self {
         // Convert BGRA to RGBA immediately
-        for chunk in bgra_data.chunks_exact_mut(4) {
+        for chunk in bgra_buffer.chunks_exact_mut(4) {
             chunk.swap(0, 2); // Swap B and R
         }
         Self {
             width,
             height,
-            rgba_data: bgra_data,
+            rgba_data: bgra_buffer.to_vec(),
         }
     }
 
-    pub fn view(&self, x: u32, y: u32, view_width: u32, view_height: u32) -> Option<Self> {
-        if x + view_width > self.width || y + view_height > self.height {
-            log::error!("View dimensions out of bounds.");
-            return None;
-        }
+    pub fn view(self, x: u32, y: u32, view_width: u32, view_height: u32) -> Option<Self> {
+        let image_view: RgbaImage = ImageBuffer::from_vec(self.width, self.height, self.rgba_data)
+            .expect("Couldn't create image buffer from raw frame");
 
-        let mut cropped_data = Vec::with_capacity((view_width * view_height * 4) as usize);
-        let stride = self.width as usize * 4;
-        let start_y = y as usize * stride;
-        let start_x = x as usize * 4;
-
-        for row in 0..view_height as usize {
-            let row_start = start_y + row * stride + start_x;
-            let row_end = row_start + (view_width as usize * 4);
-            cropped_data.extend_from_slice(&self.rgba_data[row_start..row_end]);
-        }
+        let cropped_image: Vec<u8> = image_view
+            .view(x, y, view_width, view_height)
+            .to_image()
+            .to_vec();
 
         Some(Self {
             width: view_width,
             height: view_height,
-            rgba_data: cropped_data,
+            rgba_data: cropped_image,
         })
     }
 }
@@ -59,7 +52,7 @@ pub struct FrameGrabber {
     audio_receiver: Option<mpsc::Receiver<Vec<f32>>>,
     width: u32,
     height: u32,
-    stride: usize,
+    // stride: usize,
 }
 
 impl Default for FrameGrabber {
@@ -84,26 +77,10 @@ impl FrameGrabber {
             capturer: None,
             width: 0,
             height: 0,
-            stride: 0,
+            // stride: 0,
             audio_capture: Some(audio_capture),
             audio_receiver: Some(audio_receiver),
         }
-    }
-
-    pub fn get_monitor_index(&self) -> usize {
-        self.config.lock().unwrap().capture.selected_monitor
-    }
-
-    pub fn set_monitor_index(&mut self, index: usize) {
-        {
-            let mut config = self.config.lock().unwrap();
-            config.capture.selected_monitor = index;
-        }
-        self.reset_capture();
-    }
-
-    pub fn get_config(&self) -> Arc<Mutex<Config>> {
-        Arc::clone(&self.config)
     }
 
     pub fn reset_capture(&mut self) {
@@ -130,19 +107,20 @@ impl FrameGrabber {
     pub fn capture_frame(&mut self) -> Option<CapturedFrame> {
         if self.capturer.is_none() {
             let monitor =
-                get_monitor_from_index(self.config.lock().unwrap().capture.selected_monitor).unwrap();
+                get_monitor_from_index(self.config.lock().unwrap().capture.selected_monitor)
+                    .unwrap();
             self.height = monitor.height() as u32;
             self.width = monitor.width() as u32;
-            self.stride = monitor.width() as usize * 4; // Basic stride calculation
-            if self.stride % 16 != 0 {
-                // Align to 16 bytes
-                self.stride = (self.stride + 15) & !15;
-            }
+            // self.stride = monitor.width() as usize * 4; // Basic stride calculation
+            // if self.stride % 16 != 0 {
+            //     // Align to 16 bytes
+            //     self.stride = (self.stride + 15) & !15;
+            // }
             log::debug!(
-                "Monitor dimensions: {}x{}, stride: {}",
+                "Monitor dimensions: {}x{}",
                 self.width,
                 self.height,
-                self.stride
+                // self.stride
             );
             self.capturer = Some(Capturer::new(monitor).expect("Couldn't begin capture."));
         }
@@ -151,19 +129,24 @@ impl FrameGrabber {
         match capturer.frame() {
             Ok(raw_frame) => {
                 // Create new buffer with correct size
-                let mut proper_frame = Vec::with_capacity((self.width * self.height * 4) as usize);
+                // let mut img_buffer: ImageBuffer<_, Vec<_>> =
+                //     ImageBuffer::new(self.width, self.height);
 
                 // Copy each row, skipping the stride padding
-                for y in 0..self.height as usize {
-                    let start = y * self.stride;
-                    let end = start + (self.width as usize * 4);
-                    proper_frame.extend_from_slice(&raw_frame[start..end]);
-                }
+                // for y in 0..self.height as usize {
+                //     let start = y * self.stride;
+                //     let end = start + (self.width as usize * 4);
+                //     img_buffer.extend_from_slice(&raw_frame[start..end]);
+                // }
+
+                let img_buffer: RgbaImage =
+                    ImageBuffer::from_raw(self.width, self.height, raw_frame.to_vec())
+                        .expect("Couldn't create image buffer from raw frame");
 
                 Some(CapturedFrame::from_bgra(
                     self.width,
                     self.height,
-                    proper_frame,
+                    img_buffer,
                 ))
             }
             Err(e) => match e.kind() {
@@ -181,7 +164,7 @@ impl FrameGrabber {
                     None
                 }
                 _ => {
-                    log::error!("{e:?}");
+                    log::error!("What did just happen? {e:?}");
                     None
                 }
             },
