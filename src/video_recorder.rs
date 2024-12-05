@@ -51,6 +51,14 @@ impl VideoRecorder {
         }
     }
 
+    fn cleanup(&mut self) {
+        self.audio_buffer.clear();
+        self.audio_file = None;
+        self.frame_counter = 0;
+        self.start_time = Some(Instant::now());
+        self.is_finalizing.store(false, Ordering::SeqCst);
+    }
+
     pub fn start(&mut self) {
         if self.is_recording.load(Ordering::SeqCst) {
             return;
@@ -65,7 +73,7 @@ impl VideoRecorder {
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
 
         // Create channel for frame writing
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel::<(Arc<RgbaImage>, PathBuf)>();
         self.frame_sender = Some(tx);
 
         // Spawn single background thread for writing frames
@@ -77,12 +85,8 @@ impl VideoRecorder {
             }
         });
 
-        self.audio_buffer.clear();
-        self.audio_file = None;
-        self.frame_counter = 0;
-        self.start_time = Some(Instant::now());
+        self.cleanup();
         self.frame_writer_handle = Some(writer_handle);
-        self.is_finalizing.store(false, Ordering::SeqCst);
         self.is_recording.store(true, Ordering::SeqCst);
         log::info!("Recording started");
     }
@@ -212,18 +216,6 @@ impl VideoRecorder {
 
     pub fn is_finalizing(&self) -> bool {
         self.is_finalizing.load(Ordering::SeqCst)
-    }
-
-    fn cleanup(&mut self) {
-        // Clean temp directory
-        if let Ok(config) = self.config.lock() {
-            let temp_dir: &PathBuf = &config.video.temp_dir;
-            if temp_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(temp_dir) {
-                    log::error!("Failed to clean temp directory: {}", e);
-                }
-            }
-        }
     }
 
     fn save_audio_to_wav(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
