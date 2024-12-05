@@ -85,6 +85,7 @@ impl RustreamApp {
         );
 
         let config = Arc::new(Mutex::new(Config::default()));
+        // Equivalent to Arc::clone(&config)
         let frame_grabber = FrameGrabber::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
 
@@ -592,5 +593,7 @@ impl eframe::App for RustreamApp {
 
             PageView::Receiver => self.render_receiver_mode(ui),
         });
+        
+        ctx.request_repaint();
     }
 }
