@@ -204,53 +204,8 @@ impl VideoRecorder {
         command.arg(&config.output_path);
 
         match command.output() {
-            Ok(result) => {
-                if result.status.success() {
-                    log::info!("Video generated successfully");
-                } else {
-                    log::warn!("Hardware encoding failed, falling back to CPU");
-                    let mut fallback = Command::new("ffmpeg");
-                    fallback
-                        .arg("-y")
-                        .arg("-f")
-                        .arg("image2")
-                        .arg("-r")
-                        .arg(fps.to_string())
-                        .arg("-i")
-                        .arg(config.temp_dir.join("frame_%06d.png"))
-                        .arg("-c:v")
-                        .arg("libx264")
-                        .arg("-preset")
-                        .arg("veryfast")
-                        .arg("-tune")
-                        .arg("zerolatency")
-                        .arg("-movflags")
-                        .arg("+faststart")
-                        .arg("-pix_fmt")
-                        .arg("yuv420p")
-                        .arg("-crf")
-                        .arg("23");
+            Ok(_) => log::info!("Video generated successfully"),
 
-                    if let Some(audio_file) = &audio_file {
-                        log::debug!("Falling back to CPU encoding with audio");
-                        fallback
-                            .arg("-i")
-                            .arg(audio_file)
-                            .arg("-c:a")
-                            .arg("aac")
-                            .arg("-b:a")
-                            .arg("192k");
-                    } else {
-                        log::warn!("Falling back to CPU encoding has no audio");
-                    }
-
-                    fallback.arg(&config.output_path);
-
-                    if let Err(e) = fallback.output() {
-                        log::error!("Fallback encoding failed: {}", e);
-                    }
-                }
-            }
             Err(e) => log::error!("FFmpeg execution failed: {}", e),
         }
     }
