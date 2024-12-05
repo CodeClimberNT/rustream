@@ -26,14 +26,26 @@ pub struct VideoConfig {
 
 impl Default for VideoConfig {
     fn default() -> Self {
-        let output_path = dirs::video_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("output.mp4");
+        let base_path = if cfg!(debug_assertions) {
+            // Development build - use project root
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        } else {
+            // Release build - use user's video directory
+            dirs::video_dir().unwrap_or_else(|| PathBuf::from("."))
+        };
+
+        let temp_path = if cfg!(debug_assertions) {
+            base_path.join("temp")
+        } else {
+            std::env::temp_dir().join("rustream_temp")
+        };
 
         Self {
-            output_path,
-            fps: 30,
-            temp_dir: std::env::temp_dir().join("temp"),
+            output_path: base_path.join("output.mp4"),
+            // TODO: Right now the recording is of the app that runs at 60fps, when 
+            // changing to 
+            fps: 60,
+            temp_dir: temp_path,
         }
     }
 }
@@ -41,7 +53,7 @@ impl Default for VideoConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct CaptureConfig {
     pub selected_monitor: usize,
-    pub capture_area: Option<CaptureArea>, // Changed from tuple to CaptureArea
+    pub capture_area: Option<CaptureArea>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,17 +1,17 @@
 use crate::audio_capture::AudioCapture;
 use crate::config::Config;
 use image::{GenericImageView, ImageBuffer, RgbaImage};
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 use scrap::{Capturer, Display};
 use std::sync::mpsc;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone /*Serialize, Deserialize*/)]
 pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
-    pub rgba_data: Vec<u8>,
+    pub rgba_data: Arc<RgbaImage>,
 }
 
 impl CapturedFrame {
@@ -23,24 +23,21 @@ impl CapturedFrame {
         Self {
             width,
             height,
-            rgba_data: bgra_buffer.to_vec(),
+            rgba_data: Arc::new(bgra_buffer),
         }
     }
 
-    pub fn view(self, x: u32, y: u32, view_width: u32, view_height: u32) -> Option<Self> {
-        let image_view: RgbaImage = ImageBuffer::from_vec(self.width, self.height, self.rgba_data)
-            .expect("Couldn't create image buffer from raw frame");
-
-        let cropped_image: Vec<u8> = image_view
+    pub fn view(&self, x: u32, y: u32, view_width: u32, view_height: u32) -> Self {
+        let cropped_image: RgbaImage = self
+            .rgba_data
             .view(x, y, view_width, view_height)
-            .to_image()
-            .to_vec();
+            .to_image();
 
-        Some(Self {
+        Self {
             width: view_width,
             height: view_height,
-            rgba_data: cropped_image,
-        })
+            rgba_data: Arc::new(cropped_image),
+        }
     }
 }
 

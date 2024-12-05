@@ -1,26 +1,30 @@
-use crate::config::Config;
+use crate::config::{Config, VideoConfig};
 use crate::frame_grabber::CapturedFrame;
 
+use std::time::{Duration, Instant};
 use std::{
     path::PathBuf,
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        mpsc, Arc, Mutex,
     },
     thread::{self, JoinHandle},
 };
 
 use hound::{WavSpec, WavWriter};
-use image::{ImageBuffer, RgbaImage};
+use image::RgbaImage;
 
 pub struct VideoRecorder {
     config: Arc<Mutex<Config>>,
     is_recording: Arc<AtomicBool>,
-    frame_writer_handle: Option<JoinHandle<()>>,
-    frame_counter: usize,
+    is_finalizing: Arc<AtomicBool>,
+    frame_counter: u32,
     audio_buffer: Vec<f32>,
     audio_file: Option<PathBuf>,
+    frame_writer_handle: Option<JoinHandle<()>>,
+    start_time: Option<Instant>,
+    frame_sender: Option<mpsc::Sender<(Arc<RgbaImage>, PathBuf)>>,
 }
 
 impl Default for VideoRecorder {
@@ -37,10 +41,13 @@ impl VideoRecorder {
         Self {
             config,
             is_recording: Arc::new(AtomicBool::new(false)),
+            is_finalizing: Arc::new(AtomicBool::new(false)),
             frame_writer_handle: None,
             frame_counter: 0,
             audio_buffer: Vec::new(),
             audio_file: None,
+            frame_sender: None,
+            start_time: None,
         }
     }
 
@@ -57,7 +64,25 @@ impl VideoRecorder {
         }
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
 
+        // Create channel for frame writing
+        let (tx, rx) = mpsc::channel();
+        self.frame_sender = Some(tx);
+
+        // Spawn single background thread for writing frames
+        let writer_handle = thread::spawn(move || {
+            while let Ok((image, path)) = rx.recv() {
+                if let Err(e) = image.save(&path) {
+                    log::error!("Failed to save frame: {}", e);
+                }
+            }
+        });
+
+        self.audio_buffer.clear();
+        self.audio_file = None;
         self.frame_counter = 0;
+        self.start_time = Some(Instant::now());
+        self.frame_writer_handle = Some(writer_handle);
+        self.is_finalizing.store(false, Ordering::SeqCst);
         self.is_recording.store(true, Ordering::SeqCst);
         log::info!("Recording started");
     }
@@ -71,20 +96,12 @@ impl VideoRecorder {
         let frame_path: PathBuf = temp_dir.join(format!("frame_{:06}.png", self.frame_counter));
         self.frame_counter += 1;
 
-        // Convert the frame data to an image::ImageBuffer
-        let img: RgbaImage =
-            ImageBuffer::from_raw(frame.width, frame.height, frame.rgba_data.clone())
-                .expect("Failed to create image buffer");
-
-        // Spawn a thread to save the frame asynchronously
-        let handle: JoinHandle<()> = thread::spawn(move || {
-            if let Err(e) = img.save(&frame_path) {
-                log::error!("Failed to save frame: {}", e);
+        // Send frame to background thread through channel
+        if let Some(sender) = &self.frame_sender {
+            if let Err(e) = sender.send((frame.rgba_data.clone(), frame_path)) {
+                log::error!("Failed to send frame to writer thread: {}", e);
             }
-        });
-
-        // We don't wait for the thread to finish - fire and forget
-        handle.join().ok();
+        }
     }
 
     pub fn record_audio(&mut self, audio_data: &[f32]) {
@@ -100,97 +117,156 @@ impl VideoRecorder {
         }
 
         self.is_recording.store(false, Ordering::SeqCst);
-        log::info!("Recording stopped, generating video...");
+        self.is_finalizing.store(true, Ordering::SeqCst);
 
-        // Wait for any remaining frame writes to complete
-        if let Some(handle) = self.frame_writer_handle.take() {
-            handle.join().ok();
-        }
+        self.frame_sender.take();
+        log::info!("Recording stopped, waiting for pending frames...");
 
-        // Generate the video using ffmpeg
-        let result = self.generate_video();
-        self.audio_buffer.clear();
-        self.audio_file = None;
-        result
-    }
-
-    fn generate_video(&mut self) -> bool {
-        let config = self.config.lock().unwrap().video.clone();
-
-        // Write audio to WAV file if we have audio data
-        if !self.audio_buffer.is_empty() {
-            let audio_file = config.temp_dir.join("audio.wav");
-            if let Err(e) = self.save_audio_to_wav(&audio_file) {
-                log::error!("Failed to save audio: {}", e);
-            } else {
-                self.audio_file = Some(audio_file);
-            }
-        }
-
-        let status = if let Some(audio_file) = &self.audio_file {
-            // TODO: Fix missing audio
-            log::debug!("Generating video with audio");
-            Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-framerate")
-                .arg(self.get_fps().to_string())
-                .arg("-i")
-                .arg(config.temp_dir.join("frame_%06d.png"))
-                .arg("-i")
-                .arg(audio_file)
-                .arg("-c:v")
-                .arg("libx264")
-                .arg("-c:a")
-                .arg("aac")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg("-preset")
-                .arg("medium")
-                .arg("-crf")
-                .arg("23")
-                .arg(self.get_output_path())
-                .status()
+        let elapsed_time: Duration = self.start_time.unwrap_or_else(Instant::now).elapsed();
+        let total_seconds: f64 = elapsed_time.as_secs_f64();
+        let actual_fps: u32 = if total_seconds > 0.0 {
+            (self.frame_counter as f64 / total_seconds).round() as u32
         } else {
-            log::debug!("Generating video without audio");
-            Command::new("ffmpeg")
-                .arg("-y") // Overwrite output file if it exists
-                .arg("-framerate")
-                .arg(self.get_fps().to_string())
-                .arg("-i")
-                .arg(config.temp_dir.join("frame_%06d.png"))
-                .arg("-c:v")
-                .arg("libx264")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg("-preset")
-                .arg("medium")
-                .arg("-crf")
-                .arg("23")
-                .arg(self.get_output_path())
-                .status()
+            self.config.lock().unwrap().video.fps
         };
 
-        match status {
-            Ok(exit_status) if exit_status.success() => {
-                let config = self.config.lock().unwrap().video.clone();
+        log::info!(
+            "Recording stopped. Duration: {:.2} seconds, Frames: {}, Calculated FPS: {}",
+            total_seconds,
+            self.frame_counter,
+            actual_fps
+        );
 
-                log::info!(
-                    "Video generated successfully at {:?}",
-                    self.get_output_path()
-                );
-                // Clean up temp directory
-                if let Err(e) = std::fs::remove_dir_all(&config.temp_dir) {
-                    log::error!("Failed to clean up temp directory: {}", e);
+        let writer_handle = self.frame_writer_handle.take();
+        let config = self.config.clone();
+        let is_finalizing = self.is_finalizing.clone();
+        let audio_file = self.audio_file.clone();
+
+        std::thread::spawn(move || {
+            // Wait for frame writer to finish
+            if let Some(handle) = writer_handle {
+                let _ = handle.join();
+            }
+            let config = config.lock().unwrap().video.clone();
+
+            VideoRecorder::run_ffmpeg_command(&config, audio_file, &actual_fps);
+            std::fs::remove_dir_all(&config.temp_dir).expect("Failed to clean temp directory");
+            is_finalizing.store(false, Ordering::SeqCst);
+        });
+
+        true
+    }
+
+    fn run_ffmpeg_command(config: &VideoConfig, audio_file: Option<PathBuf>, fps: &u32) {
+        log::info!("Generating video...");
+        let mut command = Command::new("ffmpeg");
+        log::info!("Temp dir: {:?}", config.temp_dir);
+        command
+            .arg("-y")
+            .arg("-hwaccel")
+            .arg("auto")
+            .arg("-framerate")
+            .arg(fps.to_string())
+            .arg("-i")
+            .arg(config.temp_dir.join("frame_%06d.png"))
+            .arg("-vf")
+            .arg(format!("fps={}", fps))
+            .arg("-c:v") // Video encoder
+            .arg("libx264") // Try NVIDIA encoder first
+            .arg("-movflags")
+            .arg("+faststart") // Enable fast start
+            .arg("-pix_fmt")
+            .arg("yuv420p")
+            .arg("-preset")
+            .arg("medium") // Encoding speed
+            .arg("-tune")
+            .arg("zerolatency")
+            .arg("-crf")
+            .arg("23");
+
+        // Add audio if available
+        if let Some(audio_file) = &audio_file {
+            log::debug!("Audio was Available for the video");
+            command
+                .arg("-i")
+                .arg(audio_file)
+                .arg("-ac") // Number of audio channels
+                .arg("1")
+                .arg("-acodec")
+                .arg("aac")
+                .arg("-b:a")
+                .arg("192k");
+        } else {
+            log::warn!("Audio was not available for the video");
+        }
+
+        // Set output path
+        command.arg(&config.output_path);
+
+        match command.output() {
+            Ok(result) => {
+                if result.status.success() {
+                    log::info!("Video generated successfully");
+                } else {
+                    log::warn!("Hardware encoding failed, falling back to CPU");
+                    let mut fallback = Command::new("ffmpeg");
+                    fallback
+                        .arg("-y")
+                        .arg("-f")
+                        .arg("image2")
+                        .arg("-r")
+                        .arg(fps.to_string())
+                        .arg("-i")
+                        .arg(config.temp_dir.join("frame_%06d.png"))
+                        .arg("-c:v")
+                        .arg("libx264")
+                        .arg("-preset")
+                        .arg("veryfast")
+                        .arg("-tune")
+                        .arg("zerolatency")
+                        .arg("-movflags")
+                        .arg("+faststart")
+                        .arg("-pix_fmt")
+                        .arg("yuv420p")
+                        .arg("-crf")
+                        .arg("23");
+
+                    if let Some(audio_file) = &audio_file {
+                        log::debug!("Falling back to CPU encoding with audio");
+                        fallback
+                            .arg("-i")
+                            .arg(audio_file)
+                            .arg("-c:a")
+                            .arg("aac")
+                            .arg("-b:a")
+                            .arg("192k");
+                    } else {
+                        log::warn!("Falling back to CPU encoding has no audio");
+                    }
+
+                    fallback.arg(&config.output_path);
+
+                    if let Err(e) = fallback.output() {
+                        log::error!("Fallback encoding failed: {}", e);
+                    }
                 }
-                true
             }
-            Ok(_) => {
-                log::error!("ffmpeg failed to generate video");
-                false
-            }
-            Err(e) => {
-                log::error!("Failed to run ffmpeg: {}", e);
-                false
+            Err(e) => log::error!("FFmpeg execution failed: {}", e),
+        }
+    }
+
+    pub fn is_finalizing(&self) -> bool {
+        self.is_finalizing.load(Ordering::SeqCst)
+    }
+
+    fn cleanup(&mut self) {
+        // Clean temp directory
+        if let Ok(config) = self.config.lock() {
+            let temp_dir: &PathBuf = &config.video.temp_dir;
+            if temp_dir.exists() {
+                if let Err(e) = std::fs::remove_dir_all(temp_dir) {
+                    log::error!("Failed to clean temp directory: {}", e);
+                }
             }
         }
     }
@@ -209,14 +285,6 @@ impl VideoRecorder {
         }
         writer.finalize()?;
         Ok(())
-    }
-
-    fn get_output_path(&self) -> PathBuf {
-        self.config.lock().unwrap().video.output_path.clone()
-    }
-
-    fn get_fps(&self) -> u32 {
-        self.config.lock().unwrap().video.fps
     }
 
     pub fn is_recording(&self) -> bool {

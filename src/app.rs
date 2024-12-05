@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
-    TextureHandle, TopBottomPanel, Window,
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText, TextureHandle, TopBottomPanel, Ui, Window
 };
 
 use log::debug;
@@ -348,7 +347,32 @@ impl RustreamApp {
             });
         self.show_config = show_config;
     }
+    
+    fn render_recording_controls(&mut self, ui: &mut Ui) {
+        let recording = self.video_recorder.is_recording();
+        let finalizing = self.video_recorder.is_finalizing();
 
+        if finalizing {
+            ui.spinner();
+            ui.label("Finalizing video...");
+            return;
+        }
+
+        if ui
+            .button(if recording {
+                "⏹ Stop Recording"
+            } else {
+                "⏺ Start Recording"
+            })
+            .clicked()
+        {
+            if recording {
+                self.video_recorder.stop();
+            } else {
+                self.video_recorder.start();
+            }
+        }
+    }
     fn render_caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
@@ -366,14 +390,23 @@ impl RustreamApp {
                 if ui.button("⚙ Settings").clicked() {
                     self.show_config = true;
                 }
+                self.render_recording_controls(ui);
+                // if self.video_recorder.is_recording() {
+                //     if ui.button("⏹ Stop Recording").clicked() && self.video_recorder.stop() {
+                //         debug!("Recording stopped and saved successfully");
+                //     }
+                // } else if ui.button("⏺ Start Recording").clicked() {
+                //     self.video_recorder.start();
+                // }
 
-                if self.video_recorder.is_recording() {
-                    if ui.button("⏹ Stop Recording").clicked() && self.video_recorder.stop() {
-                        debug!("Recording stopped and saved successfully");
-                    }
-                } else if ui.button("⏺ Start Recording").clicked() {
-                    self.video_recorder.start();
-                }
+                let output_path = self.config.lock().unwrap().video.output_path.clone();
+                let dir_name = output_path
+                    .parent()
+                    .map(|p| p.to_string_lossy())
+                    .unwrap_or_default();
+
+                ui.add(egui::Label::new("📂 ".to_string() + &dir_name))
+                    .on_hover_text(output_path.to_string_lossy());
             });
         });
 
@@ -383,38 +416,22 @@ impl RustreamApp {
         ui.vertical_centered(|ui| {
             if self.preview_active {
                 if let Some(screen_image) = self.frame_grabber.capture_frame() {
-                    let image: ColorImage = if let Some(area) = self.capture_area {
-                        // Apply cropping if we have a capture area
-                        if let Some(cropped) =
-                            screen_image
-                                .clone()
-                                .view(area.x, area.y, area.width, area.height)
-                        {
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [cropped.width as usize, cropped.height as usize],
-                                &cropped.rgba_data, // Changed from frame_data to rgba_data
-                            )
-                        } else {
-                            // Fallback to full image if crop parameters are invalid
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [screen_image.width as usize, screen_image.height as usize],
-                                &screen_image.rgba_data, // Changed from frame_data to rgba_data
-                            )
-                        }
-                    } else {
-                        // No crop area selected, show full image
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [screen_image.width as usize, screen_image.height as usize],
-                            &screen_image.rgba_data, // Changed from frame_data to rgba_data
-                        )
-                    };
+                    // Get frame (either cropped or full)
+                    let display_frame: CapturedFrame = self
+                        .capture_area
+                        .map(|area| screen_image.view(area.x, area.y, area.width, area.height))
+                        .unwrap_or(screen_image);
 
-                    // Store the active frame for network transmission if needed
-                    self.cropped_frame = if let Some(area) = self.capture_area {
-                        screen_image.view(area.x, area.y, area.width, area.height)
-                    } else {
-                        Some(screen_image)
-                    };
+                    // Record if active
+                    if self.video_recorder.is_recording() {
+                        self.video_recorder.record_frame(&display_frame);
+                    }
+
+                    // Convert to ColorImage for display
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [display_frame.width as usize, display_frame.height as usize],
+                        &display_frame.rgba_data,
+                    );
 
                     // Update texture
                     if let Some(ref mut texture) = self.display_texture {
@@ -436,43 +453,6 @@ impl RustreamApp {
             } else {
                 self.display_texture = None;
                 self.cropped_frame = None;
-            }
-
-            // ui.horizontal(|ui| {
-            //     ui.label("Output path:");
-            //     let mut recording_path = self
-            //         .config
-            //         .lock()
-            //         .unwrap()
-            //         .video
-            //         .output_path
-            //         .to_string_lossy()
-            //         .into_owned();
-            //     // ? Beware: if the path use unicode characters, it may not be displayed correctly
-            //     ui.text_edit_singleline(&mut recording_path)
-            //         // Show a tooltip with the full path when hovering over the text field (useful if it's too long)
-            //         .on_hover_text(recording_path);
-            //     if ui.button("📂 Browse").clicked() {
-            //         if let Some(path) = rfd::FileDialog::new()
-            //             .set_title("Save recording as...")
-            //             .set_file_name("recording.mp4")
-            //             .add_filter("MP4 video", &["mp4"])
-            //             .save_file()
-            //         {
-            //             let mut config = self.config.lock().unwrap();
-            //             config.video.output_path = path;
-            //         }
-            //     }
-            // });
-
-            // Record frame and audio if we're recording
-            if self.video_recorder.is_recording() {
-                if let Some((frame, audio)) = self.frame_grabber.capture_frame_with_audio() {
-                    if let Some(frame) = frame {
-                        self.video_recorder.record_frame(&frame);
-                    }
-                    self.video_recorder.record_audio(&audio);
-                }
             }
         });
     }
@@ -593,7 +573,7 @@ impl eframe::App for RustreamApp {
 
             PageView::Receiver => self.render_receiver_mode(ui),
         });
-        
+
         ctx.request_repaint();
     }
 }

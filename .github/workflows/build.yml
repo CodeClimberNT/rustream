@@ -1,0 +1,71 @@
+name: Rust CI
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --verbose
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          tag=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        id: next_version
+        run: |
+          IFS='.' read -ra PARTS <<< "${${{ steps.get_tag.outputs.latest_tag }}#v}"
+          major=${PARTS[0]:-0}
+          minor=${PARTS[1]:-0}
+          patch=${PARTS[2]:-0}
+          patch=$((patch + 1))
+          new_version="$major.$minor.$patch"
+          echo "version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.next_version.outputs.version }}
+          name: "v${{ steps.next_version.outputs.version }}"
+          prerelease: true
+          files: ./target/release/your_binary_name
+          draft: false
+          token: ${{ secrets.GITHUB_TOKEN }}
