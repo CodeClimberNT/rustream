@@ -8,30 +8,65 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText, TextureHandle, TopBottomPanel, Ui, Window
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
+    TextureHandle, TopBottomPanel, Ui, Window,
 };
 
 use log::debug;
 
-const NUM_TEXTURES: usize = 3;
-
 #[derive(Default)]
 pub struct RustreamApp {
-    config: Arc<Mutex<Config>>, // Wrap in Mutex for interior mutability
+    config: Arc<Mutex<Config>>,
     frame_grabber: FrameGrabber,
     video_recorder: VideoRecorder,
-    page: PageView,                           // Enum to track modes
-    display_texture: Option<TextureHandle>,   // Texture for the screen capture
-    textures: HashMap<String, TextureHandle>, // List of textures
-    cropped_frame: Option<CapturedFrame>,     // Cropped image to send
-    address_text: String,                     // Text input for the receiver mode
+    page: PageView,                              // Enum to track modes
+    display_texture: Option<TextureHandle>,      // Texture for the screen capture
+    textures: HashMap<TextureId, TextureHandle>, // List of textures
+    cropped_frame: Option<CapturedFrame>,        // Cropped image to send
+    address_text: String,                        // Text input for the receiver mode
     preview_active: bool,
     is_selecting: bool,
     drag_start: Option<Pos2>,
-    capture_area: Option<CaptureArea>, // Changed from tuple to CaptureArea
+    capture_area: Option<CaptureArea>,
     new_capture_area: Option<Rect>,
-    show_config: bool, // Add this field
+    show_config: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextureId {
+    Error,
+    HomeIcon,
+    QuitIcon,
+}
+
+impl std::fmt::Display for TextureId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Use enum name as string for egui texture identification
+        write!(f, "{:?}", self)
+    }
+}
+
+struct TextureResource {
+    id: TextureId,
+    path: &'static [u8],
+}
+
+const TEXTURE_LIST: &[TextureResource] = &[
+    TextureResource {
+        id: TextureId::Error,
+        path: include_bytes!("../assets/icons/error.svg"),
+    },
+    TextureResource {
+        id: TextureId::HomeIcon,
+        path: include_bytes!("../assets/icons/home_icon.svg"),
+    },
+    TextureResource {
+        id: TextureId::QuitIcon,
+        path: include_bytes!("../assets/icons/quit_icon.svg"),
+    },
+];
+
+const NUM_TEXTURES: usize = TEXTURE_LIST.len();
 
 #[derive(Default, Debug)]
 pub enum PageView {
@@ -46,47 +81,28 @@ impl RustreamApp {
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
 
-        let mut textures = HashMap::with_capacity(NUM_TEXTURES);
-        RustreamApp::add_texture_to_map(
-            &mut textures,
-            ctx,
-            "error",
-            include_bytes!("../assets/icons/error.svg"),
-            None,
-        );
+        let mut textures: HashMap<TextureId, TextureHandle> =
+            HashMap::<TextureId, TextureHandle>::with_capacity(NUM_TEXTURES);
 
-        RustreamApp::add_texture_to_map(
-            &mut textures,
-            ctx,
-            "home_icon",
-            include_bytes!("../assets/icons/home.svg"),
-            None,
-        );
-
-        RustreamApp::add_texture_to_map(
-            &mut textures,
-            ctx,
-            "quit_icon",
-            include_bytes!("../assets/icons/quit.svg"),
-            None,
-        );
+        TEXTURE_LIST.iter().for_each(|texture| {
+            RustreamApp::add_texture_to_map(&mut textures, ctx, texture, None);
+        });
 
         assert_eq!(
             textures.len(),
             NUM_TEXTURES,
             r"Numbers of Textures Declared: {} | Actual number of textures: {}, 
             Check: 
-                1. If the `NUM_TEXTURES` is correct
+                1. If the texture is loaded correctly
                 2. If the texture name is unique
                 3. Try again and pray to the Rust gods",
             NUM_TEXTURES,
             textures.len()
         );
 
-        let config = Arc::new(Mutex::new(Config::default()));
-        // Equivalent to Arc::clone(&config)
-        let frame_grabber = FrameGrabber::new(config.clone());
-        let video_recorder = VideoRecorder::new(config.clone());
+        let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
+        let frame_grabber: FrameGrabber = FrameGrabber::new(config.clone());
+        let video_recorder: VideoRecorder = VideoRecorder::new(config.clone());
 
         RustreamApp {
             config,
@@ -347,7 +363,7 @@ impl RustreamApp {
             });
         self.show_config = show_config;
     }
-    
+
     fn render_recording_controls(&mut self, ui: &mut Ui) {
         let recording = self.video_recorder.is_recording();
         let finalizing = self.video_recorder.is_finalizing();
@@ -448,7 +464,7 @@ impl RustreamApp {
                 let texture = self
                     .display_texture
                     .as_ref()
-                    .unwrap_or(self.textures.get("error").unwrap());
+                    .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
                 ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
             } else {
                 self.display_texture = None;
@@ -492,24 +508,23 @@ impl RustreamApp {
     ///
     /// # Example
     /// ```rust
-    /// let mut textures = HashMap::new();
+    /// let mut textures = HashMap<TextureId, TextureHandle>::new();
     /// let ctx = egui::Context::new();
     /// let img_bytes = include_bytes!("../assets/icons/home.svg");
-    /// add_texture_to_map(&mut textures, &ctx, "home_icon", img_bytes, None);
+    /// add_texture_to_map(&mut textures, &ctx, TextureId::HomeIcon, img_bytes, None);
     /// ```
     fn add_texture_to_map(
-        textures: &mut HashMap<String, TextureHandle>,
+        textures: &mut HashMap<TextureId, TextureHandle>,
         ctx: &Context,
-        name: &str,
-        img_bytes: &[u8],
+        resource: &TextureResource,
         texture_options: Option<egui::TextureOptions>,
     ) {
-        let image: ColorImage = match egui_extras::image::load_svg_bytes(img_bytes) {
+        let image: ColorImage = match egui_extras::image::load_svg_bytes(resource.path) {
             Ok(img) => img,
             Err(e) => {
                 log::warn!("Failed to load image: {}", e);
-                if let Some(error_texture) = textures.get("error") {
-                    textures.insert(name.to_string(), error_texture.clone());
+                if let Some(error_texture) = textures.get(&TextureId::Error) {
+                    textures.insert(resource.id, error_texture.clone());
                     return;
                 } else {
                     log::warn!("Error Texture not found. Loading RED SQUARE as error texture");
@@ -518,8 +533,12 @@ impl RustreamApp {
             }
         };
 
-        let texture = ctx.load_texture(name, image, texture_options.unwrap_or_default());
-        textures.insert(name.to_string(), texture.clone());
+        let loaded_texture = ctx.load_texture(
+            resource.id.to_string(),
+            image,
+            texture_options.unwrap_or_default(),
+        );
+        textures.insert(resource.id, loaded_texture);
     }
 }
 
@@ -533,7 +552,7 @@ impl eframe::App for RustreamApp {
                         .add_sized(
                             [80., 30.],
                             egui::Button::image_and_text(
-                                &self.textures.get("home_icon").unwrap().clone(),
+                                &self.textures.get(&TextureId::HomeIcon).unwrap().clone(),
                                 "🏠 Home",
                             ),
                         )
@@ -547,7 +566,7 @@ impl eframe::App for RustreamApp {
                         .add_sized(
                             [80., 30.],
                             egui::Button::image_and_text(
-                                &self.textures.get("quit_icon").unwrap().clone(),
+                                &self.textures.get(&TextureId::QuitIcon).unwrap().clone(),
                                 "🚪 Quit",
                             ),
                         )
