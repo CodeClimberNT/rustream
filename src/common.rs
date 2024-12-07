@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CaptureArea {
     pub x: u32,
     pub y: u32,

@@ -1,13 +1,13 @@
 use crate::audio_capture::AudioCapture;
 use crate::config::Config;
 use image::{GenericImageView, ImageBuffer, RgbaImage};
-// use serde::{Deserialize, Serialize};
+
 use std::sync::{Arc, Mutex};
 
 use scrap::{Capturer, Display};
 use std::sync::mpsc;
 
-#[derive(Debug, Default, Clone /*Serialize, Deserialize*/)]
+#[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
