@@ -2,7 +2,7 @@
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 mod app;
-mod audio_capture;
+// mod audio_capture;
 mod common;
 mod config;
 mod frame_grabber;

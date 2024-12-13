@@ -32,8 +32,9 @@ pub struct RustreamApp {
     show_config: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextureId {
+    #[default]
     Error,
     HomeIcon,
     QuitIcon,
@@ -91,8 +92,8 @@ impl RustreamApp {
         assert_eq!(
             textures.len(),
             NUM_TEXTURES,
-            r"Numbers of Textures Declared: {} | Actual number of textures: {}, 
-            Check: 
+            r"Numbers of Textures Declared: {} | Actual number of textures: {},
+            Check:
                 1. If the texture is loaded correctly
                 2. If the texture name is unique
                 3. Try again and pray to the Rust gods",
@@ -166,10 +167,10 @@ impl RustreamApp {
                 // Manual capture area input
                 ui.heading("Capture Area");
                 ui.horizontal(|ui| {
-                    let mut area = self.capture_area.unwrap_or(CaptureArea::new(0, 0, 0, 0));
+                    let mut area = self.capture_area.unwrap_or_default();
 
                     ui.vertical(|ui| {
-                        // TODO: fix 0 value error
+                        // FIXME: X=0 value error
                         ui.label("X:");
                         let mut x_str = area.x.to_string();
                         if ui.text_edit_singleline(&mut x_str).changed() {
@@ -254,10 +255,10 @@ impl RustreamApp {
                     if self.new_capture_area.is_some() && ui.button("OK").clicked() {
                         let rect = self.new_capture_area.unwrap();
                         self.capture_area = Some(CaptureArea::new(
-                            rect.min.x as u32,
-                            rect.min.y as u32,
-                            rect.width() as u32,
-                            rect.height() as u32,
+                            rect.min.x as usize,
+                            rect.min.y as usize,
+                            rect.width() as usize,
+                            rect.height() as usize,
                         ));
                         log::debug!(
                             "Capture Area: x:{}, y:{}, width:{}, height:{}",
@@ -316,7 +317,6 @@ impl RustreamApp {
                             .add_filter("MP4 video", &["mp4"])
                             .save_file()
                         {
-                            // let mut config = self.config.lock().unwrap();
                             config.video.output_path = path;
                         }
                     }
@@ -407,13 +407,6 @@ impl RustreamApp {
                     self.show_config = true;
                 }
                 self.render_recording_controls(ui);
-                // if self.video_recorder.is_recording() {
-                //     if ui.button("⏹ Stop Recording").clicked() && self.video_recorder.stop() {
-                //         debug!("Recording stopped and saved successfully");
-                //     }
-                // } else if ui.button("⏺ Start Recording").clicked() {
-                //     self.video_recorder.start();
-                // }
 
                 let output_path = self.config.lock().unwrap().video.output_path.clone();
                 let dir_name = output_path
@@ -431,36 +424,34 @@ impl RustreamApp {
 
         ui.vertical_centered(|ui| {
             if self.preview_active {
-                if let Some(screen_image) = self.frame_grabber.capture_frame() {
-                    // Get frame (either cropped or full)
-                    let display_frame: CapturedFrame = self
-                        .capture_area
-                        .map(|area| screen_image.view(area.x, area.y, area.width, area.height))
-                        .unwrap_or(screen_image);
-
+                if let Ok(display_frame) = self.frame_grabber.capture_frame(self.capture_area) {
                     // Record if active
                     if self.video_recorder.is_recording() {
                         self.video_recorder.record_frame(&display_frame);
                     }
 
                     // Convert to ColorImage for display
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [display_frame.width as usize, display_frame.height as usize],
+                    let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+                        [display_frame.width, display_frame.height],
                         &display_frame.rgba_data,
                     );
 
-                    // Update texture
-                    if let Some(ref mut texture) = self.display_texture {
-                        texture.set(image, egui::TextureOptions::default());
-                    } else {
-                        self.display_texture = Some(ctx.load_texture(
-                            "display_texture",
-                            image,
-                            egui::TextureOptions::default(),
-                        ));
+                    // Update texture in memory
+                    match self.display_texture {
+                        Some(ref mut texture) => {
+                            texture.set(image, egui::TextureOptions::default());
+                        }
+                        None => {
+                            self.display_texture = Some(ctx.load_texture(
+                                "display_texture",
+                                image,
+                                egui::TextureOptions::default(),
+                            ));
+                        }
                     }
                 }
 
+                // Update texture in UI
                 let texture = self
                     .display_texture
                     .as_ref()
@@ -522,12 +513,12 @@ impl RustreamApp {
         let image: ColorImage = match egui_extras::image::load_svg_bytes(resource.path) {
             Ok(img) => img,
             Err(e) => {
-                log::warn!("Failed to load image: {}", e);
-                if let Some(error_texture) = textures.get(&TextureId::Error) {
+                log::error!("Failed to load image: {}", e);
+                if let Some(error_texture) = textures.get(&TextureId::default()) {
                     textures.insert(resource.id, error_texture.clone());
                     return;
                 } else {
-                    log::warn!("Error Texture not found. Loading RED SQUARE as error texture");
+                    log::error!("Default Texture not found.");
                     ColorImage::new([50, 50], egui::Color32::RED)
                 }
             }
