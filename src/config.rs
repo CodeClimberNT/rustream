@@ -1,8 +1,6 @@
-use crate::common::CaptureArea;
-// use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     pub video: VideoConfig,
     pub capture: CaptureConfig,
@@ -50,10 +48,38 @@ impl Default for VideoConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct CaptureConfig {
     pub selected_monitor: usize,
-    pub capture_area: Option<CaptureArea>,
+    pub options: scap::capturer::Options,
+    // pub capture_area: Option<CaptureArea>,
+    pub show_cursor: bool, // New field
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        let options = scap::capturer::Options {
+            fps: 60,
+            show_cursor: true,
+            show_highlight: true,
+            excluded_targets: None,
+            output_type: scap::frame::FrameType::BGRAFrame,
+            output_resolution: scap::capturer::Resolution::_720p,
+            // crop_area: Some(Area {
+            //     origin: Point { x: 0.0, y: 0.0 },
+            //     size: Size {
+            //         width: 500.0,
+            //         height: 500.0,
+            //     },
+            // }),
+            ..Default::default()
+        };
+        Self {
+            selected_monitor: 0,
+            options,
+            show_cursor: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

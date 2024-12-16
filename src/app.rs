@@ -354,7 +354,6 @@ impl RustreamApp {
                 }
 
                 // Apply changes if the config has changed
-                let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
                 if has_config_changed {
                     log::debug!("Config changed: {:?}", config);
                     self.config.lock().unwrap().update(config);
@@ -424,33 +423,38 @@ impl RustreamApp {
 
         ui.vertical_centered(|ui| {
             if self.preview_active {
-                if let Ok(display_frame) = self.frame_grabber.capture_frame(self.capture_area) {
-                    // Record if active
-                    if self.video_recorder.is_recording() {
-                        self.video_recorder.record_frame(&display_frame);
+                match self.frame_grabber.capture_frame(self.capture_area) {
+                    Ok(display_frame) => {
+                        // Record if active
+                        if self.video_recorder.is_recording() {
+                            self.video_recorder.record_frame(&display_frame);
+                        }
+
+                        // Convert to ColorImage for display
+                        let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+                            [display_frame.width, display_frame.height],
+                            &display_frame.rgba_data,
+                        );
+
+                        // Update texture in memory
+                        match self.display_texture {
+                            Some(ref mut texture) => {
+                                texture.set(image, egui::TextureOptions::default());
+                            }
+                            None => {
+                                self.display_texture = Some(ctx.load_texture(
+                                    "display_texture",
+                                    image,
+                                    egui::TextureOptions::default(),
+                                ));
+                            }
+                        }
                     }
-
-                    // Convert to ColorImage for display
-                    let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
-                        [display_frame.width, display_frame.height],
-                        &display_frame.rgba_data,
-                    );
-
-                    // Update texture in memory
-                    match self.display_texture {
-                        Some(ref mut texture) => {
-                            texture.set(image, egui::TextureOptions::default());
-                        }
-                        None => {
-                            self.display_texture = Some(ctx.load_texture(
-                                "display_texture",
-                                image,
-                                egui::TextureOptions::default(),
-                            ));
-                        }
+                    Err(e) => {
+                        log::error!("Capture error: {}", e);
+                        self.preview_active = false;
                     }
                 }
-
                 // Update texture in UI
                 let texture = self
                     .display_texture
