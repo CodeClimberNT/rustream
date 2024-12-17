@@ -1,9 +1,10 @@
-use crate::audio_capture::AudioCapture;
+use crate::{audio_capture::AudioCapture};
 use crate::config::Config;
 use image::{GenericImageView, ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-
+use std::process::{Command, Stdio};
+use std::io::Write;
 use scrap::{Capturer, Display};
 use std::sync::mpsc;
 
@@ -41,6 +42,35 @@ impl CapturedFrame {
             height: view_height,
             rgba_data: cropped_image,
         })
+    }
+
+    pub fn encode_to_h264(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut ffmpeg = Command::new("ffmpeg")
+            .args([
+                "-f", "rawvideo", // input is raw video
+                "-pixel_format", "rgba",
+                "-video_size", &format!("{}x{}", self.width, self.height),
+                "-i", "-", // input from stdin
+                "-c:v", "libx264", // Codec H.264
+                "-preset", "ultrafast",
+                "-f", "rawvideo", // output raw
+                "-", // output to stdout
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()) // Ignora errori di ffmpeg per semplicità
+            .spawn()?;
+
+        // write RGBA data in stdin
+        ffmpeg.stdin.as_mut().unwrap().write_all(&self.rgba_data)?;
+
+        // read H.264 encoded data from stdout
+        let output = ffmpeg.wait_with_output()?;
+        if !output.status.success() {
+            return Err("FFmpeg encoding failed".into());
+        }
+
+        Ok(output.stdout)
     }
 }
 
@@ -143,11 +173,9 @@ impl FrameGrabber {
                     ImageBuffer::from_raw(self.width, self.height, raw_frame.to_vec())
                         .expect("Couldn't create image buffer from raw frame");
 
-                Some(CapturedFrame::from_bgra(
-                    self.width,
-                    self.height,
-                    img_buffer,
-                ))
+                let rgba_img = CapturedFrame::from_bgra(self.width, self.height, img_buffer);
+
+                Some(rgba_img)
             }
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {

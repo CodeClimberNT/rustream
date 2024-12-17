@@ -7,6 +7,7 @@ mod common;
 mod config;
 mod frame_grabber;
 mod video_recorder;
+mod data_streaming;
 
 use app::RustreamApp;
 use egui::{ViewportBuilder, X11WindowType};

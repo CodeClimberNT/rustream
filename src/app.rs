@@ -2,6 +2,7 @@ use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
+use crate::data_streaming::{Sender, cast_streaming};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -32,6 +33,7 @@ pub struct RustreamApp {
     capture_area: Option<CaptureArea>, // Changed from tuple to CaptureArea
     new_capture_area: Option<Rect>,
     show_config: bool, // Add this field
+    sender_options: Option<Sender>,
 }
 
 #[derive(Default, Debug)]
@@ -87,12 +89,14 @@ impl RustreamApp {
         let config = Arc::new(Mutex::new(Config::default()));
         let frame_grabber = FrameGrabber::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
+        //let sender_options = Sender::new();
 
         RustreamApp {
             config,
             frame_grabber,
             video_recorder,
             textures,
+            //sender_options,
             ..Default::default()
         }
     }
@@ -382,6 +386,20 @@ impl RustreamApp {
         ui.vertical_centered(|ui| {
             if self.preview_active {
                 if let Some(screen_image) = self.frame_grabber.capture_frame() {
+ 
+
+                    /*let create_sender = async {
+                        self.sender_options = Some(Sender::new().await);
+                    };*/
+                    // Spawn the async block to run it
+                    //tokio::spawn(cast_streaming(screen_image.clone()));
+                    let screen = screen_image.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = cast_streaming(screen).await {
+                            eprintln!("Error in cast_streaming: {}", e);
+                        }
+                    });
+
                     let image: ColorImage = if let Some(area) = self.capture_area {
                         // Apply cropping if we have a capture area
                         if let Some(cropped) =
