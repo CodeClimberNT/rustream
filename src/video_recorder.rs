@@ -208,7 +208,10 @@ impl VideoRecorder {
         command.arg(&config.output_path);
 
         match command.output() {
-            Ok(_) => log::info!("Video generated successfully"),
+            Ok(_) => log::info!(
+                "Video generated successfully: {}",
+                &config.output_path.to_string_lossy()
+            ),
 
             Err(e) => log::error!("FFmpeg execution failed: {}", e),
         }

@@ -12,8 +12,6 @@ use egui::{
     TextureHandle, TopBottomPanel, Ui, Window,
 };
 
-use log::debug;
-
 #[derive(Default)]
 pub struct RustreamApp {
     config: Arc<Mutex<Config>>,
@@ -431,7 +429,7 @@ impl RustreamApp {
                     }
 
                     // Convert to ColorImage for display
-                    let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+                    let image: ColorImage = egui::ColorImage::from_rgba_premultiplied(
                         [display_frame.width, display_frame.height],
                         &display_frame.rgba_data,
                     );
@@ -475,7 +473,7 @@ impl RustreamApp {
                 .lost_focus()
             {
                 ui.label(format!("Address:{}", self.address_text));
-                debug!("Address: {}", self.address_text);
+                log::debug!("Address: {}", self.address_text);
             }
         });
         ui.button("Connect")
