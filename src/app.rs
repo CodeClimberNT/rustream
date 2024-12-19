@@ -221,6 +221,63 @@ impl RustreamApp {
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
                 if self.is_selecting {
+                    // Open a new full-size window for selecting capture area
+                    
+                    egui::Window::new("Select Capture Area")
+                        .collapsible(false)
+                        .resizable(false)
+                        .default_size(ctx.screen_rect().size())
+                        .show(ctx, |ui| {
+                            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+
+                            if response.drag_started() {
+                                self.drag_start = Some(response.interact_pointer_pos().unwrap());
+                            }
+
+                            if let Some(start) = self.drag_start {
+                                if let Some(current) = response.interact_pointer_pos() {
+                                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                                    if let Some(rect) = self.new_capture_area {
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            0.0,
+                                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                                        );
+                                        ui.painter().rect_stroke(
+                                            rect,
+                                            0.0,
+                                            egui::Stroke::new(2.0, egui::Color32::GREEN),
+                                        );
+                                    }
+                                }
+                            }
+
+                            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                                let rect = self.new_capture_area.unwrap();
+                                self.capture_area = Some(CaptureArea::new(
+                                    rect.min.x as usize,
+                                    rect.min.y as usize,
+                                    rect.width() as usize,
+                                    rect.height() as usize,
+                                ));
+                                log::debug!(
+                                    "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                                    self.capture_area.unwrap().x,
+                                    self.capture_area.unwrap().y,
+                                    self.capture_area.unwrap().width,
+                                    self.capture_area.unwrap().height
+                                );
+                                self.is_selecting = false;
+                                self.drag_start = None;
+                                self.new_capture_area = None;
+                            }
+
+                            if ui.button("Cancel").clicked() {
+                                self.is_selecting = false;
+                                self.new_capture_area = None;
+                                self.drag_start = None;
+                            }
+                        });
                     // TODO: Select capture area
                     // display a rectangle to show the selected area
                     let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
@@ -248,6 +305,7 @@ impl RustreamApp {
                             }
                         }
                     }
+
 
                     // OK button to confirm selection
                     if self.new_capture_area.is_some() && ui.button("OK").clicked() {
