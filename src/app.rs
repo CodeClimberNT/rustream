@@ -3,9 +3,11 @@ use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
 use crate::data_streaming::{Sender, cast_streaming};
+use tokio::sync::oneshot::channel;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync;
 
 use eframe::egui;
 use egui::{
@@ -33,7 +35,7 @@ pub struct RustreamApp {
     capture_area: Option<CaptureArea>, // Changed from tuple to CaptureArea
     new_capture_area: Option<Rect>,
     show_config: bool, // Add this field
-    sender_options: Option<Sender>,
+    sender_options: Arc<tokio::sync::Mutex<Option<Sender>>>,
 }
 
 #[derive(Default, Debug)]
@@ -89,14 +91,13 @@ impl RustreamApp {
         let config = Arc::new(Mutex::new(Config::default()));
         let frame_grabber = FrameGrabber::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
-        //let sender_options = Sender::new();
+        //let sender_options = Arc::new(Mutex::new(None));
 
         RustreamApp {
             config,
             frame_grabber,
             video_recorder,
             textures,
-            //sender_options,
             ..Default::default()
         }
     }
@@ -392,10 +393,37 @@ impl RustreamApp {
                         self.sender_options = Some(Sender::new().await);
                     };*/
                     // Spawn the async block to run it
-                    //tokio::spawn(cast_streaming(screen_image.clone()));
+                    
                     let screen = screen_image.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let lock = self.sender_options.lock().await; //expect("Failed to lock self.sender_options");
+                    if lock.is_none() {
+                        let sender_options = self.sender_options.clone();
+                        
+                        tokio::spawn(async move {
+                            let sender = Sender::new().await;
+                            let mut lock = sender_options.lock().expect("Failed to lock sender options");
+                            *lock = Some(sender);
+                            
+                            let _ = tx.send(());
+                            
+                        });
+
+                        //self.sender_options = Some(join_handle.await??);
+                    }
+                    else{
+                        let _ = tx.send(());
+                    }
+                    let send_op = self.sender_options.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = cast_streaming(screen).await {
+                        let _ = rx.await;  //wait for signal to start
+                        //let sender_options = self.sender_options.clone();
+                        //let mut lock = send_op.lock().expect("Failed to lock sender options");
+                       
+                        let mut lock = send_op.lock().unwrap();
+                       
+                        
+                        if let Err(e) = cast_streaming(send_op, screen).await {
                             eprintln!("Error in cast_streaming: {}", e);
                         }
                     });

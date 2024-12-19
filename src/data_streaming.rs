@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, thread};
 use tokio::net::UdpSocket;
-
+use std::sync::{Arc, Mutex};
 use crate::frame_grabber::{CapturedFrame};
 
 pub struct Sender {
@@ -12,11 +12,11 @@ pub struct Sender {
 impl Sender {
     //initialize caster UdpSocket 
     pub async fn new() -> Self {
-        let sock = UdpSocket::bind("0.0.0.0:8081").await;
+        let sock = UdpSocket::bind("0.0.0.0:50000").await;
         let sock = match sock {
             Ok(socket) => socket,
             Err(_) => {
-                println!("Failed to bind socket  to port 8081, binding to default port 0");
+                println!("Failed to bind socket  to port 50000, binding to default port");
                 let default_sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
                 println!("Socket bound to port {}",  default_sock.local_addr().unwrap().port()); //.to_string()?
                 default_sock
@@ -70,12 +70,16 @@ impl Sender {
     }
 }
 
-pub async fn cast_streaming(frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn cast_streaming(sender: Arc<Mutex<Option<Sender>>>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sender_guard = sender.lock().expect("failed to lock sender");
     
-    let mut sender = Sender::new().await;
-    sender.listen_for_receivers().await?;
-    sender.send_data(frame).await?;
-    Ok(())
+    if let Some(ref mut s) = *sender_guard {
+        s.listen_for_receivers().await?;
+        s.send_data(frame).await?;
+        Ok(())
+    } else {
+        Err("No sender available".into())
+    }  
     
 }
 
