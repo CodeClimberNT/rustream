@@ -6,11 +6,17 @@ use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use egui_overlay::EguiOverlay;
+
 use eframe::egui;
 use egui::{
     CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
     TextureHandle, TopBottomPanel, Ui, Window,
 };
+
+
+use std::process::Command;
+use std::env;
 
 #[derive(Default)]
 pub struct RustreamApp {
@@ -28,6 +34,54 @@ pub struct RustreamApp {
     capture_area: Option<CaptureArea>,
     new_capture_area: Option<Rect>,
     show_config: bool,
+    secondary_window_open: bool,
+}
+
+#[derive(Default)]
+struct SelectionWindow {
+    drag_start: Option<egui::Pos2>,
+    new_capture_area: Option<egui::Rect>,
+}
+
+impl eframe::App for SelectionWindow {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label("Drag to select the capture area:");
+
+            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+
+            if response.drag_started() {
+                self.drag_start = Some(response.interact_pointer_pos().unwrap());
+            }
+
+            if let Some(start) = self.drag_start {
+                if let Some(current) = response.interact_pointer_pos() {
+                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                    if let Some(rect) = self.new_capture_area {
+                        ui.painter().rect_filled(
+                            rect,
+                            0.0,
+                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                        );
+                        ui.painter().rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(2.0, egui::Color32::GREEN),
+                        );
+                    }
+                }
+            }
+
+            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                println!("Capture Area Selected: {:?}", self.new_capture_area);
+                // Logica per salvare o restituire l'area selezionata
+            }
+
+            if ui.button("Cancel").clicked() {
+                // Logica per annullare la selezione
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -216,14 +270,27 @@ impl RustreamApp {
 
                 ui.heading("Streaming Settings");
                 ui.separator();
-
+                
                 // TODO: Select capture area
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
                 if self.is_selecting {
-                    // Open a new full-size window for selecting capture area
+                     println!("{:?}", self.capture_area);
+                    //creating a transparent window with egui-overlay
                     
-                    egui::Window::new("Select Capture Area")
+
+                    // Open a new full-size window for selecting capture area
+                        //check if the process with arg --secondary is opened yet
+                        
+                        Command::new(env::current_exe().unwrap())
+                            .arg("--secondary")
+                            .spawn()
+                            .expect("Failed to spawn secondary window");
+                   
+
+                    self.is_selecting = false;
+ 
+                    /*egui::Window::new("Select Capture Area")
                         .collapsible(false)
                         .resizable(false)
                         .default_size(ctx.screen_rect().size())
@@ -276,63 +343,12 @@ impl RustreamApp {
                                 self.is_selecting = false;
                                 self.new_capture_area = None;
                                 self.drag_start = None;
-                            }
-                        });
+                            } 
+                        }); */
                     // TODO: Select capture area
                     // display a rectangle to show the selected area
-                    let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
 
-                    // display a rectangle to show the selected area
-                    if response.drag_started() {
-                        self.drag_start = Some(response.interact_pointer_pos().unwrap());
-                    }
-
-                    if let Some(start) = self.drag_start {
-                        if let Some(current) = response.interact_pointer_pos() {
-                            self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
-                            // Draw the selection rectangle
-                            if let Some(rect) = self.new_capture_area {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    0.0,
-                                    egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                                );
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    0.0,
-                                    egui::Stroke::new(2.0, egui::Color32::GREEN),
-                                );
-                            }
-                        }
-                    }
-
-
-                    // OK button to confirm selection
-                    if self.new_capture_area.is_some() && ui.button("OK").clicked() {
-                        let rect = self.new_capture_area.unwrap();
-                        self.capture_area = Some(CaptureArea::new(
-                            rect.min.x as usize,
-                            rect.min.y as usize,
-                            rect.width() as usize,
-                            rect.height() as usize,
-                        ));
-                        log::debug!(
-                            "Capture Area: x:{}, y:{}, width:{}, height:{}",
-                            self.capture_area.unwrap().x,
-                            self.capture_area.unwrap().y,
-                            self.capture_area.unwrap().width,
-                            self.capture_area.unwrap().height
-                        );
-                        self.is_selecting = false;
-                        self.drag_start = None;
-                        self.new_capture_area = None;
-                    }
-                    // Cancel selection
-                    if ui.button("Cancel").clicked() {
-                        self.is_selecting = false;
-                        self.new_capture_area = None;
-                        self.drag_start = None;
-                    }
+                      
                 }
 
                 // Update capture area in config when it changes
@@ -461,6 +477,7 @@ impl RustreamApp {
 
                 if ui.button("⚙ Settings").clicked() {
                     self.show_config = true;
+                    
                 }
                 self.render_recording_controls(ui);
 
@@ -641,5 +658,119 @@ impl eframe::App for RustreamApp {
         });
 
         ctx.request_repaint();
+    }
+}
+
+pub struct SecondaryApp {
+    rustream_app: Arc<Mutex<RustreamApp>>,
+}
+
+impl SecondaryApp {
+    pub fn new(rustream_app: Arc<Mutex<RustreamApp>>) -> Self {
+        Self { rustream_app }
+    }
+}
+
+
+impl eframe::App for SecondaryApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut app = self.rustream_app.lock().unwrap();
+
+        // Uso un TopBottomPanel per l'intestazione e i pulsanti
+        TopBottomPanel::top("top_panel")
+            .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Resize Area for Streaming");
+                    
+                    // Pulsanti OK e Annulla accanto all'intestazione
+                    if ui.button("OK").clicked() {
+                        if let Some(rect) = app.new_capture_area {
+                            app.capture_area = Some(CaptureArea::new(
+                                rect.min.x as usize,
+                                rect.min.y as usize,
+                                rect.width() as usize,
+                                rect.height() as usize,
+                            ));
+                            log::debug!(
+                                "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                                app.capture_area.unwrap().x,
+                                app.capture_area.unwrap().y,
+                                app.capture_area.unwrap().width,
+                                app.capture_area.unwrap().height
+                            );
+                        }
+                        // Reset states
+                        app.is_selecting = false;
+                        app.drag_start = None;
+                        //app.new_capture_area = None;
+                        println!("{:?}", app.capture_area);
+                        // Exit app
+                        std::process::exit(0);
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        app.is_selecting = false;
+                        //app.new_capture_area = None;
+                        app.drag_start = None;
+                    }
+                });
+            });
+
+        // Il pannello centrale rimane trasparente
+        CentralPanel::default()
+            .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
+            .show(ctx, |ui| {
+                let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+
+                if response.drag_started() {
+                    app.drag_start = Some(response.interact_pointer_pos().unwrap());
+                }
+
+                if let Some(start) = app.drag_start {
+                    if let Some(current) = response.interact_pointer_pos() {
+                        app.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                        if let Some(rect) = app.new_capture_area {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                0.0,
+                                egui::Stroke::new(2.0, egui::Color32::GREEN),
+                            );
+                        }
+                    }
+                }
+
+                if app.new_capture_area.is_some() && ui.button("OK").clicked() {
+                    let rect = app.new_capture_area.unwrap();
+                    app.capture_area = Some(CaptureArea::new(
+                        rect.min.x as usize,
+                        rect.min.y as usize,
+                        rect.width() as usize,
+                        rect.height() as usize,
+                    ));
+                    log::debug!(
+                        "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                        app.capture_area.unwrap().x,
+                        app.capture_area.unwrap().y,
+                        app.capture_area.unwrap().width,
+                        app.capture_area.unwrap().height
+                    );
+                    // Reset states
+                    app.is_selecting = false;
+                    app.drag_start = None;
+                    //app.new_capture_area = None;
+                }
+
+                if ui.button("Cancel").clicked() {
+                    app.is_selecting = false;
+                    //app.new_capture_area = None;
+                    app.drag_start = None;
+                }
+            });
     }
 }
