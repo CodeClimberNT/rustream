@@ -84,10 +84,10 @@ impl CapturedFrame {
         buffer_bgra: BgraBuffer,
         buffer_width: usize,
         buffer_height: usize,
-        crop_area: Option<CaptureArea>,
+        capture_area: Option<CaptureArea>,
     ) -> Self {
         // Default to full buffer if crop_area is None
-        let (rgba_data, final_width, final_height) = match crop_area {
+        let (rgba_data, final_width, final_height) = match capture_area {
             Some(crop) => {
                 Self::bgra_to_rgba_with_crop(buffer_bgra, buffer_width, buffer_height, crop)
             }
@@ -155,7 +155,7 @@ impl FrameGrabber {
 
     pub fn capture_frame(
         &mut self,
-        crop_area: Option<CaptureArea>,
+        capture_area: Option<CaptureArea>,
     ) -> Result<CapturedFrame, std::io::Error> {
         if self.capturer.is_none() {
             let monitor: Display =
@@ -174,7 +174,7 @@ impl FrameGrabber {
                 raw_frame.to_vec(),
                 self.width,
                 self.height,
-                crop_area,
+                capture_area,
             )),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
