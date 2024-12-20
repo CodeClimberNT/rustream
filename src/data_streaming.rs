@@ -1,19 +1,22 @@
-use std::{net::SocketAddr, thread};
+use std::{net::SocketAddr};
 use tokio::net::UdpSocket;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use crate::frame_grabber::{CapturedFrame};
+use tokio::sync::Mutex;
 
+#[derive(Clone)]
 pub struct Sender {
-    pub socket: UdpSocket,
-    pub receivers: Vec<SocketAddr>,
+    socket: Arc<UdpSocket>,
+    receivers: Arc<Mutex<Vec<SocketAddr>>>,
     //serve pure il frame da mandare? o il buffer di frames?
 }
 
 impl Sender {
     //initialize caster UdpSocket 
+    //implementare il fatto che l'ack da mandare dopo aver ricevuto richiesta dal client deve contenere la porta su cui il client deve connettersi (ma dovrebbe già saperla per fare richiesta teoricamente)
     pub async fn new() -> Self {
-        let sock = UdpSocket::bind("0.0.0.0:50000").await;
-        let sock = match sock {
+        let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap(); 
+        /*let sock = match sock {
             Ok(socket) => socket,
             Err(_) => {
                 println!("Failed to bind socket  to port 50000, binding to default port");
@@ -22,66 +25,88 @@ impl Sender {
                 default_sock
             }
             //sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-        };
+        };*/
         Self { 
-            socket: sock, 
-            receivers: Vec::new() 
+            socket: Arc::new(sock), 
+            receivers: Arc::new(Mutex::new(Vec::new())) 
         }
     }
 
-    pub async fn listen_for_receivers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn listen_for_receivers(&self) {
         let mut buf = [0; 1024];
-        loop {
-            let (len, peer_addr) = self.socket.recv_from(&mut buf).await?;
-            self.receivers.push(peer_addr);
-        }
+        let receivers = self.receivers.clone();
+        let socket = self.socket.clone();
+        
+        tokio::spawn(async move {
+            loop {
+                match socket.recv_from(&mut buf).await {
+                    Ok((_, peer_addr)) => {
+                        let mut receivers = receivers.lock().await;
+                        if !receivers.contains(&peer_addr) {
+                            receivers.push(peer_addr);
+                            println!("New receiver connected: {}", peer_addr);
+                        }
+                    }
+                    Err(e) => eprintln!("Error receiving connection: {}", e),
+                }
+            }
+        });
     }
 
     pub async fn send_data(&self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     
-        //let socket = self.socket;
-       
-        let encoded_frame= frame.encode_to_h264();
+        let encoded_frame= frame.encode_to_h264()?;
+        let receivers = self.receivers.lock().await;
         
+        if receivers.is_empty() {
+            return Ok(());  // Return early if no receivers
+        }
         //loop {
             
-        if self.receivers.len() != 0 {
-            if let Ok(ref frame) = encoded_frame {
-                for chunk in frame.chunks(1024) {
-                    for peer in self.receivers.iter() {
-                        match  self.socket.try_send_to(chunk, *peer) { 
-                            Ok(_) => (),
-                            Err(_) => Err("Failed to send data")?,
-                            
-                        }
-                    }
+        for chunk in encoded_frame.chunks(1024) {
+            for &peer in receivers.iter() {
+                if let Err(e) = self.socket.send_to(chunk, peer).await {
+                    eprintln!("Error sending to {}: {}", peer, e);
                 }
-                Ok(())
-            }  
-            else {
-                Err("Error encoding frame to H264")?
-            }  
+            }
         }
-        else {
-            Err("No receivers connected")?
-        }  
-        //}
+        Ok(())
         
     }
 }
 
-pub async fn cast_streaming(sender: Arc<Mutex<Option<Sender>>>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
-    let mut sender_guard = sender.lock().expect("failed to lock sender");
+pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    // Start listening for new receivers in the background
+    sender.listen_for_receivers().await;
+    sender.send_data(frame).await
+}
+
+pub async fn send_frame(sender: &Sender, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    sender.send_data(frame).await
+}
+
+/*pub async fn cast_streaming(sender: &mut Sender, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    //let mut sender_guard = sender.lock().expect("failed to lock sender");
+    //let mut sender_guard = sender.lock().await;
     
-    if let Some(ref mut s) = *sender_guard {
+        
+            sender.listen_for_receivers().await;
+            sender.send_data(frame).await?;
+            Ok(())
+        
+    //sender_guard.listen_for_receivers().await?;
+    //sender_guard.send_data(frame).await?;
+    //Ok(())
+
+    /*if let Some(ref mut s) = *sender_guard {
         s.listen_for_receivers().await?;
         s.send_data(frame).await?;
         Ok(())
     } else {
         Err("No sender available".into())
-    }  
+    }  */
     
-}
+}*/
 
 //send datagram to caster to request the streaming
 pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box<dyn std::error::Error>> {

@@ -2,12 +2,13 @@ use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
-use crate::data_streaming::{Sender, cast_streaming};
+use crate::data_streaming::{Sender, start_streaming, send_frame};
 use tokio::sync::oneshot::channel;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync;
+use tokio::task;
 
 use eframe::egui;
 use egui::{
@@ -29,13 +30,15 @@ pub struct RustreamApp {
     textures: HashMap<String, TextureHandle>, // List of textures
     cropped_frame: Option<CapturedFrame>,     // Cropped image to send
     address_text: String,                     // Text input for the receiver mode
-    preview_active: bool,
+    //preview_active: bool,
+    streaming_active: bool,
     is_selecting: bool,
     drag_start: Option<Pos2>,
     capture_area: Option<CaptureArea>, // Changed from tuple to CaptureArea
     new_capture_area: Option<Rect>,
     show_config: bool, // Add this field
-    sender_options: Arc<tokio::sync::Mutex<Option<Sender>>>,
+    sender: Option<Arc<Sender>>,
+    sender_receiver: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
 }
 
 #[derive(Default, Debug)]
@@ -91,14 +94,23 @@ impl RustreamApp {
         let config = Arc::new(Mutex::new(Config::default()));
         let frame_grabber = FrameGrabber::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
-        //let sender_options = Arc::new(Mutex::new(None));
 
         RustreamApp {
             config,
             frame_grabber,
             video_recorder,
             textures,
+            sender: None,
+            sender_receiver: None,
+            streaming_active: false,
             ..Default::default()
+        }
+    }
+
+    async fn initialize_sender(&mut self) {
+        if self.sender.is_none() {
+            let sender = Arc::new(Sender::new().await);
+            self.sender = Some(sender);
         }
     }
 
@@ -109,10 +121,11 @@ impl RustreamApp {
     }
 
     fn reset_ui(&mut self) {
-        // Reset the application
+        // Reset the application when rertuning to the home page
         self.frame_grabber.reset_capture();
         self.page = PageView::default();
         self.address_text.clear();
+        self.sender = None;
     }
 
     fn set_page(&mut self, page: PageView) {
@@ -359,13 +372,17 @@ impl RustreamApp {
         ui.separator();
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
-                self.preview_active ^= ui
-                    .button(if self.preview_active {
-                        "Stop Preview Screen"
-                    } else {
-                        "Start Preview Screen"
-                    })
-                    .clicked();
+                //rivedi, cambiare pulsante in start streaming, la preview è automatica
+                if ui.button(if self.streaming_active {
+                    "Stop Streaming"
+                } else {
+                    "Start Streaming"
+                }).clicked() {
+                    self.streaming_active = !self.streaming_active; // Toggle streaming
+                    if !self.streaming_active {
+                        self.sender = None; // Clear sender when stopping streaming
+                    }
+                }
 
                 if ui.button("⚙ Settings").clicked() {
                     self.show_config = true;
@@ -385,17 +402,109 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            if self.preview_active {
-                if let Some(screen_image) = self.frame_grabber.capture_frame() {
- 
+            
+            if let Some(screen_image) = self.frame_grabber.capture_frame() {
 
+                let screen_clone = screen_image.clone(); // Clone the screen image for streaming
+
+                let image: ColorImage = if let Some(area) = self.capture_area {
+                    // Apply cropping if we have a capture area
+                    if let Some(cropped) =
+                        screen_image
+                            .clone()
+                            .view(area.x, area.y, area.width, area.height)
+                    {
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [cropped.width as usize, cropped.height as usize],
+                            &cropped.rgba_data, // Changed from frame_data to rgba_data
+                        )
+                    } else {
+                        // Fallback to full image if crop parameters are invalid
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [screen_image.width as usize, screen_image.height as usize],
+                            &screen_image.rgba_data, // Changed from frame_data to rgba_data
+                        )
+                    }
+                } else {
+                    // No crop area selected, show full image
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [screen_image.width as usize, screen_image.height as usize],
+                        &screen_image.rgba_data, // Changed from frame_data to rgba_data
+                    )
+                };
+
+                // Store the active frame for network transmission if needed
+                self.cropped_frame = if let Some(area) = self.capture_area {
+                    screen_image.view(area.x, area.y, area.width, area.height)
+                } else {
+                    Some(screen_image)
+                };
+
+                // Update texture
+                if let Some(ref mut texture) = self.display_texture {
+                    texture.set(image, egui::TextureOptions::default());
+                } else {
+                    self.display_texture = Some(ctx.load_texture(
+                        "display_texture",
+                        image,
+                        egui::TextureOptions::default(),
+                    ));
+                }
+                
+                
+            
+                if self.streaming_active {
+                    // Initialize sender if it doesn't exist
+                    /*if s.is_none() {
+                        let runtime = tokio::runtime::Runtime::new().unwrap();
+                        runtime.block_on(async {
+                            let sender = Arc::new(Sender::new().await);
+                            self.sender = Some(sender);
+                        });
+                    }*/
+
+                    // Initialize sender if it doesn't exist
+                    if self.sender.is_none() {
+                        let  (tx, rx) = tokio::sync::oneshot::channel();
+
+                        tokio::spawn(async move {
+                            let sender = Sender::new().await;
+                            let _ = tx.send(Arc::new(sender));
+                        });
+                        
+
+                        // Check if we have a pending sender initialization
+                        if let Some(mut rx) = self.sender_receiver.take() {
+                            // Try to receive the sender
+                            if let Ok(sender) = rx.try_recv() {
+                                self.sender = Some(sender);
+                            }
+                        } else {
+                            // Put the receiver back if we haven't received yet
+                            self.sender_receiver = Some(rx);
+                        }
+                    }
+
+                    // Send frame if we have a sender
+                    if let Some(sender) = &self.sender {
+                        let sender_clone = sender.clone();
+                        
+                        tokio::spawn(async move {
+                            
+                            if let Err(e) = start_streaming(sender_clone, screen_clone).await {
+                                eprintln!("Error sending frame: {}", e);
+                            }
+                        });
+                    }
+                }
+                
                     /*let create_sender = async {
                         self.sender_options = Some(Sender::new().await);
                     };*/
                     // Spawn the async block to run it
                     
-                    let screen = screen_image.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    //let screen = screen_image.clone();
+                    /*let (tx, rx) = tokio::sync::oneshot::channel();
                     let lock = self.sender_options.lock().await; //expect("Failed to lock self.sender_options");
                     if lock.is_none() {
                         let sender_options = self.sender_options.clone();
@@ -426,62 +535,48 @@ impl RustreamApp {
                         if let Err(e) = cast_streaming(send_op, screen).await {
                             eprintln!("Error in cast_streaming: {}", e);
                         }
+                    });*/
+
+                    //cast_streaming(self.sender_options.clone(), screen);
+
+                    /*let screen = screen_image.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let sender_options = self.sender_options.clone();
+                    
+                    let sender_options_clone = sender_options.clone();
+                    let screen_clone = screen.clone();
+                    
+                    
+                    tokio::spawn(async move {
+                        if sender_options_clone.lock().await.is_none() {
+                            let sender = Sender::new().await;
+                            let mut lock = sender_options_clone.lock().await;
+                            *lock = Some(sender);
+
+                            let _ = tx.send(());
+                        } else {
+                            let _ = tx.send(());
+                        }
                     });
 
-                    let image: ColorImage = if let Some(area) = self.capture_area {
-                        // Apply cropping if we have a capture area
-                        if let Some(cropped) =
-                            screen_image
-                                .clone()
-                                .view(area.x, area.y, area.width, area.height)
-                        {
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [cropped.width as usize, cropped.height as usize],
-                                &cropped.rgba_data, // Changed from frame_data to rgba_data
-                            )
-                        } else {
-                            // Fallback to full image if crop parameters are invalid
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [screen_image.width as usize, screen_image.height as usize],
-                                &screen_image.rgba_data, // Changed from frame_data to rgba_data
-                            )
+                    let send_op = self.sender_options.clone();
+                    tokio::spawn(async move {
+                        let _ = rx.await;  // wait for signal to start
+                        let mut lock = send_op.lock().await;
+                        if let Some(sender) = &mut *lock {
+                            if let Err(e) = cast_streaming(sender, screen_clone).await {
+                                eprintln!("Error in cast_streaming: {}", e);
+                            }
                         }
-                    } else {
-                        // No crop area selected, show full image
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [screen_image.width as usize, screen_image.height as usize],
-                            &screen_image.rgba_data, // Changed from frame_data to rgba_data
-                        )
-                    };
+                    });*/
 
-                    // Store the active frame for network transmission if needed
-                    self.cropped_frame = if let Some(area) = self.capture_area {
-                        screen_image.view(area.x, area.y, area.width, area.height)
-                    } else {
-                        Some(screen_image)
-                    };
+            }
 
-                    // Update texture
-                    if let Some(ref mut texture) = self.display_texture {
-                        texture.set(image, egui::TextureOptions::default());
-                    } else {
-                        self.display_texture = Some(ctx.load_texture(
-                            "display_texture",
-                            image,
-                            egui::TextureOptions::default(),
-                        ));
-                    }
-                }
-
-                let texture = self
+            let texture = self
                     .display_texture
                     .as_ref()
                     .unwrap_or(self.textures.get("error").unwrap());
                 ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
-            } else {
-                self.display_texture = None;
-                self.cropped_frame = None;
-            }
 
             // ui.horizontal(|ui| {
             //     ui.label("Output path:");
