@@ -6,7 +6,10 @@ use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+
+use eframe::egui_wgpu::capture;
 use egui_overlay::EguiOverlay;
+use lazy_static::lazy_static;
 
 use eframe::egui;
 use egui::{
@@ -17,6 +20,10 @@ use egui::{
 
 use std::process::Command;
 use std::env;
+
+lazy_static! {
+    pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> = Arc::new(Mutex::new(CaptureArea::default()));
+}
 
 #[derive(Default)]
 pub struct RustreamApp {
@@ -219,7 +226,8 @@ impl RustreamApp {
                 // Manual capture area input
                 ui.heading("Capture Area");
                 ui.horizontal(|ui| {
-                    let mut area = self.capture_area.unwrap_or_default();
+                    let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
+                    //println!("this is the global variable: {:?}", *area);
 
                     ui.vertical(|ui| {
                         // FIXME: X=0 value error
@@ -228,7 +236,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut x_str).changed() {
                             if let Ok(x) = x_str.parse() {
                                 area.x = x;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
 
@@ -237,7 +245,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut y_str).changed() {
                             if let Ok(y) = y_str.parse() {
                                 area.y = y;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
                     });
@@ -248,7 +256,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut width_str).changed() {
                             if let Ok(width) = width_str.parse() {
                                 area.width = width;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
 
@@ -257,7 +265,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut height_str).changed() {
                             if let Ok(height) = height_str.parse() {
                                 area.height = height;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
                     });
@@ -282,12 +290,29 @@ impl RustreamApp {
                     // Open a new full-size window for selecting capture area
                         //check if the process with arg --secondary is opened yet
                         
-                        Command::new(env::current_exe().unwrap())
+                       let output= Command::new(env::current_exe().unwrap())
                             .arg("--secondary")
-                            .spawn()
-                            .expect("Failed to spawn secondary window");
-                   
+                            .output()
+                            .expect("failed to execute process");
 
+
+                            if output.status.success() {
+                                // Parse the standard output
+                                let stdout = std::str::from_utf8(&output.stdout).unwrap();
+                                println!("Main process received: {}", stdout);
+                                let capture_area: CaptureArea = serde_json::from_str(stdout).unwrap();
+                                
+                                self.capture_area = Some(capture_area);
+                            } else {
+                                // Handle errors from the secondary process
+                                let stderr = std::str::from_utf8(&output.stderr).unwrap();
+                                eprintln!("Secondary process error: {}", stderr);
+                            }
+                        
+                            
+                      
+                      
+                        
                     self.is_selecting = false;
  
                     /*egui::Window::new("Select Capture Area")
@@ -686,12 +711,14 @@ impl eframe::App for SecondaryApp {
                     // Pulsanti OK e Annulla accanto all'intestazione
                     if ui.button("OK").clicked() {
                         if let Some(rect) = app.new_capture_area {
-                            app.capture_area = Some(CaptureArea::new(
+                           let output = CaptureArea::new(
                                 rect.min.x as usize,
                                 rect.min.y as usize,
                                 rect.width() as usize,
                                 rect.height() as usize,
-                            ));
+                            );
+                            let serialized = serde_json::to_string(&output).unwrap();
+                            println!("{}", serialized);
                             log::debug!(
                                 "Capture Area: x:{}, y:{}, width:{}, height:{}",
                                 app.capture_area.unwrap().x,
@@ -704,7 +731,9 @@ impl eframe::App for SecondaryApp {
                         app.is_selecting = false;
                         app.drag_start = None;
                         //app.new_capture_area = None;
-                        println!("{:?}", app.capture_area);
+                        //let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
+                        //*area = app.capture_area.unwrap();
+                        //println!("this is the global variable: {:?}", *area);
                         // Exit app
                         std::process::exit(0);
                     }
@@ -747,6 +776,7 @@ impl eframe::App for SecondaryApp {
 
                 if app.new_capture_area.is_some() && ui.button("OK").clicked() {
                     let rect = app.new_capture_area.unwrap();
+                    //println!("sono qua");
                     app.capture_area = Some(CaptureArea::new(
                         rect.min.x as usize,
                         rect.min.y as usize,
@@ -760,6 +790,7 @@ impl eframe::App for SecondaryApp {
                         app.capture_area.unwrap().width,
                         app.capture_area.unwrap().height
                     );
+                    
                     // Reset states
                     app.is_selecting = false;
                     app.drag_start = None;

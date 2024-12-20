@@ -53,11 +53,13 @@ fn main() {
         //persist_window: true,
         viewport: ViewportBuilder {
             transparent: Some(true),
-            fullscreen: Some(false),
-            min_inner_size: Some(Vec2::new(1920.0, 1080.0)), // Set the desired full screen size
+            fullscreen: Some(true),
+            //maximized: Some(true),
+            //min_inner_size: Some(Vec2::new(1920.0, 1080.0)), // Set the desired full screen size
             decorations: Some(false),
             title: Some(APP_TITLE.to_string()),
-            position: Some(Pos2::new(0.0, 0.0)),
+            resizable: Some(false),
+            //position: Some(Pos2::new(0.0, 0.0)),
             window_type: Option::from(X11WindowType::Toolbar),
             ..Default::default()
         },
@@ -66,7 +68,7 @@ fn main() {
     };
 
     if is_secondary {
-        println!("Running Secondary App");
+        //println!("Running Secondary App");
         eframe::run_native(
             "Resize Me",
             options2,

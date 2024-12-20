@@ -1,6 +1,5 @@
-// use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+use serde::{Deserialize, Serialize};
+#[derive(Debug, Clone, Copy, Default, PartialEq,Deserialize, Serialize)]
 pub struct CaptureArea {
     pub x: usize,
     pub y: usize,
