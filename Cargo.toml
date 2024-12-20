@@ -12,7 +12,7 @@
 
 [dependencies]
     # UI, (wgpu use gfx to create a HAL: https://github.com/gfx-rs/gfx#hardware-abstraction-layer)
-    winit = "0.26"
+    
     lazy_static = "1.4"
    
     egui = { version = "0.30.0", features = [

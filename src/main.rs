@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::Vec2;
 use eframe::NativeOptions;
 
-use winit;
 
 const APP_TITLE: &str = "RUSTREAM";
 
@@ -53,8 +52,8 @@ fn main() {
         //persist_window: true,
         viewport: ViewportBuilder {
             transparent: Some(true),
-            fullscreen: Some(true),
-            //maximized: Some(true),
+            fullscreen: Some(false),
+            maximized: Some(true),
             //min_inner_size: Some(Vec2::new(1920.0, 1080.0)), // Set the desired full screen size
             decorations: Some(false),
             title: Some(APP_TITLE.to_string()),
