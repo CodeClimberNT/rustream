@@ -701,10 +701,6 @@ impl SecondaryApp {
 impl eframe::App for SecondaryApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut app = self.rustream_app.lock().unwrap();
-        
-        // Get screen info and scaling
-        let screen_rect = ctx.screen_rect();
-        let window_pos = screen_rect.min;
         let scale_factor = ctx.pixels_per_point();
         
         CentralPanel::default()
@@ -732,25 +728,22 @@ impl eframe::App for SecondaryApp {
                             current.y * scale_factor
                         );
                         app.new_capture_area = Some(egui::Rect::from_two_pos(start, screen_pos));
-                        
-                        if let Some(rect) = app.new_capture_area {
-                            let display_rect = egui::Rect::from_min_max(
-                                egui::pos2(rect.min.x/scale_factor, rect.min.y/scale_factor),
-                                egui::pos2(rect.max.x/scale_factor, rect.max.y/scale_factor)
-                            );
-
-                            ui.painter().rect_filled(
-                                display_rect,
-                                0.0,
-                                egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                            );
-                            ui.painter().rect_stroke(
-                                display_rect,
-                                0.0,
-                                egui::Stroke::new(2.0, egui::Color32::GREEN),
-                            );
-                        }
                     }
+                }
+
+                // Draw persistent border rectangle
+                if let Some(rect) = app.new_capture_area {
+                    let display_rect = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x/scale_factor, rect.min.y/scale_factor),
+                        egui::pos2(rect.max.x/scale_factor, rect.max.y/scale_factor)
+                    );
+
+                    // Draw only stroke with increased thickness
+                    ui.painter().rect_stroke(
+                        display_rect,
+                        0.0,
+                        egui::Stroke::new(3.0, egui::Color32::GREEN),
+                    );
 
                     if response.drag_released() {
                         app.show_popup = true;
@@ -780,7 +773,6 @@ impl eframe::App for SecondaryApp {
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
                                         if ui.add_sized([button_width, 40.0], egui::Button::new("OK")).clicked() {
-                                            // Convert to actual screen coordinates
                                             let output = CaptureArea::new(
                                                 (rect.min.x).round() as usize,
                                                 (rect.min.y).round() as usize,
@@ -789,7 +781,7 @@ impl eframe::App for SecondaryApp {
                                             );
 
                                             let serialized = serde_json::to_string(&output).unwrap();
-                                            println!("{}\n", serialized); // Add newline
+                                            println!("{}\n", serialized);
                                             std::io::stdout().flush().unwrap();
                                             
                                             app.capture_area = Some(output);
