@@ -25,7 +25,9 @@ fn main() {
         .filter_module("resvg", LevelFilter::Off)
         .init();
 
-    // make the options easier to change
+    //TODO: min size
+    //~870x630
+
     let options: eframe::NativeOptions = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: ViewportBuilder {

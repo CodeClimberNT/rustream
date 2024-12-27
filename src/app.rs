@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextureHandle,
-    TopBottomPanel, Ui, Window,
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Frame, Rect, RichText,
+    TextureHandle, TopBottomPanel, Ui, Window,
 };
 
 #[derive(Default)]
@@ -31,7 +31,7 @@ pub struct RustreamApp {
     show_config: bool,
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
-    // show_hotkey_modal: bool,
+    triggered_actions: Vec<HotkeyAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -134,60 +134,35 @@ impl RustreamApp {
         self.page = page;
     }
 
-    fn handle_hotkey(&mut self, action: &HotkeyAction) {
-        // First check if we should block all hotkeys
-        if self.editing_hotkey.is_some() {
-            return;
-        }
-
-        match action {
-            // UI Actions (highest priority)
-            HotkeyAction::ClosePopup => {
-                if self.show_config {
-                    self.show_config = false;
-                }
-            }
-
-            // Global Actions
-            HotkeyAction::Quit => self.exit(),
-
-            // Page Specific Actions
-            action => {
-                match (self.page, action) {
-                    (PageView::Caster, HotkeyAction::TogglePreview) => {
-                        self.preview_active = !self.preview_active;
-                    }
-
-                    // TODO: change to receiver page when it is implemented
-                    (PageView::Caster, HotkeyAction::StartRecording) => {
-                        if !self.video_recorder.is_finalizing() {
-                            if self.video_recorder.is_recording() {
-                                self.video_recorder.stop();
-                            } else {
-                                self.video_recorder.start();
-                            }
-                        }
-                    }
-                    _ => {
-                        log::info!("Action not applicable to current page: {}", action);
-                    } // Ignore actions not applicable to current page
-                }
-            }
-        }
-    }
-
     fn home_page(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(80.0);
 
-                if ui.button("CAST NEW STREAMING").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("CAST NEW STREAMING")
+                                .size(32.0)
+                                .strong(),
+                        )
+                        .min_size(egui::vec2(300.0, 60.0)),
+                    )
+                    .clicked()
+                {
                     self.set_page(PageView::Caster);
                 }
 
                 ui.add_space(30.0);
-
-                if ui.button("VIEW STREAMING").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
+                        )
+                        .min_size(egui::vec2(300.0, 60.0)),
+                    )
+                    .clicked()
+                {
                     self.set_page(PageView::Receiver);
                 }
             });
@@ -526,14 +501,15 @@ impl RustreamApp {
             return;
         }
 
-        if ui
-            .button(if recording {
+        if self.action_button(
+            ui,
+            if recording {
                 "⏹ Stop Recording"
             } else {
                 "⏺ Start Recording"
-            })
-            .clicked()
-        {
+            },
+            HotkeyAction::StartRecording,
+        ) {
             if recording {
                 self.video_recorder.stop();
             } else {
@@ -542,20 +518,23 @@ impl RustreamApp {
         }
     }
     fn render_caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
-        // show the selected monitor as continuous feedback of frames
         ui.heading("Monitor Feedback");
         ui.separator();
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
-                self.preview_active ^= ui
-                    .button(if self.preview_active {
+                if self.action_button(
+                    ui,
+                    if self.preview_active {
                         "Stop Preview Screen"
                     } else {
                         "Start Preview Screen"
-                    })
-                    .clicked();
+                    },
+                    HotkeyAction::TogglePreview,
+                ) {
+                    self.preview_active = !self.preview_active;
+                }
 
-                if ui.button("⚙ Settings").clicked() {
+                if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
                     self.show_config = true;
                 }
                 self.render_recording_controls(ui);
@@ -635,6 +614,75 @@ impl RustreamApp {
             .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
 
+    fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {
+        // Check if Alt is pressed for underline
+        let alt_pressed = ui.input(|i| i.modifiers.alt);
+
+        // Get hotkey text if exists
+        let hotkey_text = self
+            .hotkey_manager
+            .shortcuts
+            .iter()
+            .find(|(_, a)| **a == action)
+            .map(|(k, _)| format!(" ({})", k))
+            .unwrap_or_default();
+
+        // Create full text for size calculation
+        let full_text = format!("{}{}", label, hotkey_text);
+
+        // Calculate size with padding
+        let galley = ui.painter().layout_no_wrap(
+            full_text.clone(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        );
+        let padding = ui.spacing().button_padding;
+        let min_size = egui::vec2(
+            galley.size().x + padding.x * 2.0,
+            galley.size().y + padding.y * 2.0,
+        );
+
+        // Create displayed text (with or without hotkey)
+        let display_text = if alt_pressed {
+            full_text
+        } else {
+            label.to_string()
+        };
+
+        // Create button with fixed minimum size
+        ui.add_sized(min_size, egui::Button::new(display_text))
+            .clicked()
+            || self.triggered_actions.contains(&action)
+    }
+
+    fn clickable_title(&mut self, ui: &mut egui::Ui, text: &str, action: HotkeyAction) -> bool {
+        let alt_pressed = ui.input(|i| i.modifiers.alt);
+        let hotkey = self
+            .hotkey_manager
+            .shortcuts
+            .iter()
+            .find(|(_, a)| **a == action)
+            .map(|(k, _)| format!(" ({})", k))
+            .unwrap_or_default();
+
+        let response = ui
+            .add(
+                egui::Label::new(
+                    RichText::new(if alt_pressed {
+                        format!("{}{}", text, hotkey)
+                    } else {
+                        text.to_string()
+                    })
+                    .font(FontId::proportional(40.0))
+                    .color(Color32::GOLD),
+                )
+                .sense(egui::Sense::click()),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+        response.clicked() || self.triggered_actions.contains(&action)
+    }
+
     /// Add a texture to the texture map
     /// If the texture fails to load, an error texture is loaded instead
     /// The error texture is a red square
@@ -683,58 +731,26 @@ impl RustreamApp {
         );
         textures.insert(resource.id, loaded_texture);
     }
-
-    fn exit(&self) {
-        std::process::exit(0);
-    }
 }
 
 impl eframe::App for RustreamApp {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         if let Some(action) = self.hotkey_manager.handle_input(ctx) {
-            self.handle_hotkey(&action);
+            self.triggered_actions.push(action);
         }
-        TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    // Home button
-                    if ui
-                        .add_sized(
-                            [80., 30.],
-                            egui::Button::image_and_text(
-                                &self.textures.get(&TextureId::HomeIcon).unwrap().clone(),
-                                "🏠 Home",
-                            ),
-                        )
-                        .clicked()
-                    {
+        TopBottomPanel::top("header")
+            .frame(
+                Frame::none()
+                    .fill(ctx.style().visuals.window_fill())
+                    .inner_margin(8.0),
+            )
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    if self.clickable_title(ui, "Welcome to RUSTREAM!", HotkeyAction::Home) {
                         self.reset_ui();
                     }
-
-                    // Quit button
-                    if ui
-                        .add_sized(
-                            [80., 30.],
-                            egui::Button::image_and_text(
-                                &self.textures.get(&TextureId::QuitIcon).unwrap().clone(),
-                                "🚪 Quit",
-                            ),
-                        )
-                        .clicked()
-                    {
-                        self.exit();
-                    }
-                });
-
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        RichText::new("Welcome to RUSTREAM!")
-                            .font(FontId::proportional(40.0))
-                            .color(Color32::GOLD),
-                    );
                 });
             });
-        });
         CentralPanel::default().show(ctx, |ui| match self.page {
             PageView::HomePage => self.home_page(ui),
 
@@ -743,6 +759,7 @@ impl eframe::App for RustreamApp {
             PageView::Receiver => self.render_receiver_mode(ui),
         });
 
+        self.triggered_actions.clear();
         ctx.request_repaint();
     }
 }

@@ -6,8 +6,11 @@ pub enum HotkeyAction {
     ToggleStreaming,
     TogglePreview,
     StartRecording,
+    Home,
+    // FIXME: Quit not used -> remove or implement?
     Quit,
     ClosePopup,
+    // TODO: Add more actions
 }
 
 impl HotkeyAction {
@@ -101,6 +104,15 @@ impl HotkeyManager {
                 key: Key::R,
             },
             HotkeyAction::StartRecording,
+        );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::Home,
+            },
+            HotkeyAction::Home,
         );
         self.default_shortcuts.insert(
             KeyCombination {
