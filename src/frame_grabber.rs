@@ -153,24 +153,32 @@ impl FrameGrabber {
         &self.monitors
     }
 
-    pub fn capture_frame(
-        &mut self,
-        capture_area: Option<CaptureArea>,
-    ) -> Result<CapturedFrame, std::io::Error> {
+    pub fn capture_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
         if self.capturer.is_none() {
-            let monitor: Display =
-                get_monitor_from_index(self.config.lock().unwrap().capture.selected_monitor)
-                    .unwrap();
+            let monitor = match get_monitor_from_index(
+                self.config.lock().unwrap().capture.selected_monitor,
+            ) {
+                Ok(m) => m,
+                Err(_) => return None,
+            };
+
             self.height = monitor.height();
             self.width = monitor.width();
-
             log::debug!("Monitor dimensions: {}x{}", self.width, self.height);
-            self.capturer = Some(Capturer::new(monitor)?);
+
+            self.capturer = match Capturer::new(monitor) {
+                Ok(cap) => Some(cap),
+                Err(e) => {
+                    log::error!("Capturer could not be initialized: {}", e);
+                    return None;
+                }
+            };
         }
 
-        let capturer: &mut Capturer = self.capturer.as_mut().unwrap();
+        let capturer = self.capturer.as_mut()?;
+
         match capturer.frame() {
-            Ok(raw_frame) => Ok(CapturedFrame::from_bgra_buffer(
+            Ok(raw_frame) => Some(CapturedFrame::from_bgra_buffer(
                 raw_frame.to_vec(),
                 self.width,
                 self.height,
@@ -179,7 +187,7 @@ impl FrameGrabber {
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
                     log::debug!("Frame not ready; skipping this frame.");
-                    Err(e)
+                    None
                 }
                 _ => {
                     log::error!(
@@ -187,7 +195,7 @@ impl FrameGrabber {
                         Resetting capturer."
                     );
                     self.reset_capture();
-                    Err(e)
+                    None
                 }
             },
         }

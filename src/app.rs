@@ -137,6 +137,9 @@ impl RustreamApp {
             HotkeyAction::TogglePreview => {
                 self.preview_active = !self.preview_active;
             }
+            HotkeyAction::Quit => {
+                self.exit();
+            }
             _ => {} // Handle other actions as they're added
         }
     }
@@ -434,7 +437,7 @@ impl RustreamApp {
 
         ui.vertical_centered(|ui| {
             if self.preview_active {
-                if let Ok(display_frame) = self.frame_grabber.capture_frame(self.capture_area) {
+                if let Some(display_frame) = self.frame_grabber.capture_frame(self.capture_area) {
                     // Record if active
                     if self.video_recorder.is_recording() {
                         self.video_recorder.record_frame(&display_frame);
@@ -541,6 +544,10 @@ impl RustreamApp {
         );
         textures.insert(resource.id, loaded_texture);
     }
+
+    fn exit(&self) {
+        std::process::exit(0);
+    }
 }
 
 impl eframe::App for RustreamApp {
@@ -576,7 +583,7 @@ impl eframe::App for RustreamApp {
                         )
                         .clicked()
                     {
-                        std::process::exit(0);
+                        self.exit();
                     }
                 });
 
