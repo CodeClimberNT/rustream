@@ -6,6 +6,7 @@ mod app;
 mod common;
 mod config;
 mod frame_grabber;
+mod hotkey;
 mod video_recorder;
 
 use app::RustreamApp;

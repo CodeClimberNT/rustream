@@ -1,6 +1,7 @@
 use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
+use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::video_recorder::VideoRecorder;
 
 use std::collections::HashMap;
@@ -28,6 +29,7 @@ pub struct RustreamApp {
     capture_area: Option<CaptureArea>,
     new_capture_area: Option<Rect>,
     show_config: bool,
+    hotkey_manager: HotkeyManager,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -108,6 +110,7 @@ impl RustreamApp {
             frame_grabber,
             video_recorder,
             textures,
+            hotkey_manager: HotkeyManager::new(),
             ..Default::default()
         }
     }
@@ -127,6 +130,15 @@ impl RustreamApp {
 
     fn set_page(&mut self, page: PageView) {
         self.page = page;
+    }
+
+    fn handle_hotkey(&mut self, action: HotkeyAction) {
+        match action {
+            HotkeyAction::TogglePreview => {
+                self.preview_active = !self.preview_active;
+            }
+            _ => {} // Handle other actions as they're added
+        }
     }
 
     fn home_page(&mut self, ui: &mut egui::Ui) {
@@ -533,6 +545,9 @@ impl RustreamApp {
 
 impl eframe::App for RustreamApp {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+        if let Some(action) = self.hotkey_manager.handle_input(ctx) {
+            self.handle_hotkey(action);
+        }
         TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
