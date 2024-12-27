@@ -128,7 +128,7 @@ impl HotkeyManager {
     pub fn handle_input(&mut self, ui: &egui::Context) -> Option<HotkeyAction> {
         let input = ui.input(|i| {
             (
-                i.modifiers.ctrl,
+                i.modifiers.command,
                 i.modifiers.shift,
                 i.modifiers.alt,
                 i.keys_down.iter().next().copied(),
