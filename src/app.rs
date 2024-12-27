@@ -380,15 +380,7 @@ impl RustreamApp {
                                     .shortcuts
                                     .iter()
                                     .find(|(_, a)| *a == action)
-                                    .map(|(k, _)| {
-                                        format!(
-                                            "{}{}{}{:?}",
-                                            if k.ctrl { "Ctrl+" } else { "" },
-                                            if k.shift { "Shift+" } else { "" },
-                                            if k.alt { "Alt+" } else { "" },
-                                            k.key
-                                        )
-                                    })
+                                    .map(|(k, _)| k.to_string())
                                     .unwrap_or_else(|| "Unassigned".to_string());
 
                                 ui.label(combo_text);

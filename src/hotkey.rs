@@ -48,8 +48,9 @@ impl KeyCombination {
         ctrl: false,
         shift: false,
         alt: false,
-        // Any key, will be ignored
-        key: Key::Enter,
+        // Any key will do, this value is never used
+        // Better to have an unused value than an Option<Key>
+        key: Key::F23,
     };
 }
 
@@ -177,15 +178,41 @@ impl HotkeyManager {
         self.shortcuts.insert(combination, action);
     }
 
-    pub fn get_unassigned_actions(&self) -> Vec<HotkeyAction> {
-        self.default_shortcuts
-            .values()
-            .filter(|action| !self.shortcuts.values().any(|a| a == *action))
-            .cloned()
-            .collect()
-    }
-
     pub fn reset_to_defaults(&mut self) {
         self.shortcuts = self.default_shortcuts.clone();
+    }
+}
+
+impl std::fmt::Display for KeyCombination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if cfg!(target_os = "macos") {
+            let key_str = match self.key {
+                Key::Escape => "⎋".to_string(),
+                Key::Tab => "⇥".to_string(),
+                Key::Backspace => "⌫".to_string(),
+                Key::Enter => "↵".to_string(),
+                Key::Space => "Space".to_string(),
+                _ => format!("{:?}", self.key),
+            };
+
+            write!(
+                f,
+                "{}{}{}{}",
+                if self.ctrl { "⌘+" } else { "" },
+                if self.shift { "⇧+" } else { "" },
+                if self.alt { "⌥+" } else { "" },
+                key_str
+            )
+        } else {
+            let key_str = format!("{:?}", self.key);
+            write!(
+                f,
+                "{}{}{}{}",
+                if self.ctrl { "Ctrl+" } else { "" },
+                if self.shift { "Shift+" } else { "" },
+                if self.alt { "Alt+" } else { "" },
+                key_str
+            )
+        }
     }
 }
