@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui_wgpu::capture;
 use egui_overlay::EguiOverlay;
 use lazy_static::lazy_static;
+use serde_json::json;
 
 use eframe::egui;
 use egui::{
@@ -282,6 +283,7 @@ impl RustreamApp {
                 ui.separator();
                 
                 // TODO: Select capture area
+                ui.horizontal(|ui|{
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
                 if self.is_selecting {
@@ -302,13 +304,32 @@ impl RustreamApp {
                                 // Parse the standard output
                                 let stdout = std::str::from_utf8(&output.stdout).unwrap();
                                 println!("Main process received: {}", stdout);
-                                let capture_area: CaptureArea = serde_json::from_str(stdout).unwrap();
                                 
-                                self.capture_area = Some(capture_area);
+                                // Parse JSON response
+                                let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap();
+                                
+                                match json_response["status"].as_str() {
+                                    Some("success") => {
+                                        // Parse capture area data on success
+                                        if let Some(data) = json_response.get("data") {
+                                            let capture_area: CaptureArea = serde_json::from_value(data.clone()).unwrap();
+                                            self.capture_area = Some(capture_area);
+                                        }
+                                    },
+                                    Some("cancelled") => {
+                                        println!("User cancelled the capture operation");
+                                        //self.capture_area = None;
+                                    },
+                                    _ => {
+                                        eprintln!("Unknown status in response");
+                                        self.capture_area = None;
+                                    }
+                                }
                             } else {
                                 // Handle errors from the secondary process
                                 let stderr = std::str::from_utf8(&output.stderr).unwrap();
                                 eprintln!("Secondary process error: {}", stderr);
+                                self.capture_area = None;
                             }
                         
                             
@@ -378,6 +399,14 @@ impl RustreamApp {
                       
                 }
 
+
+                if self.capture_area.is_some() {
+                    if ui.button("Reset Capture Area").clicked() {
+                        self.capture_area = None;
+                    }
+                }
+
+            });
                 // Update capture area in config when it changes
                 if let Some(area) = self.capture_area {
                     let mut config = self.config.lock().unwrap();
@@ -701,7 +730,38 @@ impl SecondaryApp {
 impl eframe::App for SecondaryApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut app = self.rustream_app.lock().unwrap();
+        
+        // Handle Alt+F4 and window close events
+        if ctx.input(|i| i.viewport().close_requested()) {
+            println!("{{\"status\": \"cancelled\"}}\n");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(0);
+        }
+
+        // Add Esc key handling
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            println!("{{\"status\": \"cancelled\"}}\n");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(0);
+        }
+        
         let scale_factor = ctx.pixels_per_point();
+        
+        // Add tutorial window
+        egui::Window::new("Tutorial")
+            .fixed_pos([10.0, 10.0])
+            .title_bar(false)
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180)))
+            .show(ctx, |ui| {
+                ui.colored_label(
+                    egui::Color32::WHITE,
+                    "How to select an area:\n\
+                     1. Click and drag to select the desired area\n\
+                     2. Release to confirm the selection\n\
+                     3. Click OK to capture or Cancel to try again\n\
+                     Press ESC at any time to exit"
+                );
+            });
         
         CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
@@ -738,11 +798,11 @@ impl eframe::App for SecondaryApp {
                         egui::pos2(rect.max.x/scale_factor, rect.max.y/scale_factor)
                     );
 
-                    // Draw only stroke with increased thickness
+                    // Draw semi-transparent border
                     ui.painter().rect_stroke(
                         display_rect,
                         0.0,
-                        egui::Stroke::new(3.0, egui::Color32::GREEN),
+                        egui::Stroke::new(3.0, egui::Color32::from_rgba_unmultiplied(0, 255, 0, 128)),
                     );
 
                     if response.drag_released() {
@@ -780,8 +840,12 @@ impl eframe::App for SecondaryApp {
                                                 (rect.height()).round() as usize,
                                             );
 
-                                            let serialized = serde_json::to_string(&output).unwrap();
-                                            println!("{}\n", serialized);
+                                            let output_with_status = json!({
+                                                "status": "success",
+                                                "data": output
+                                            });
+
+                                            println!("{}\n", serde_json::to_string(&output_with_status).unwrap());
                                             std::io::stdout().flush().unwrap();
                                             
                                             app.capture_area = Some(output);
@@ -795,10 +859,12 @@ impl eframe::App for SecondaryApp {
                                         ui.add_space(spacing);
                                         
                                         if ui.add_sized([button_width, 40.0], egui::Button::new("Cancel")).clicked() {
+                            
                                             app.show_popup = false;
                                             app.is_selecting = false;
                                             app.drag_start = None;
                                             app.new_capture_area = None;
+                                            
                                         }
                                     }
                                 );
