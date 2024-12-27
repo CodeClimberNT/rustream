@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
-    TextureHandle, TopBottomPanel, Ui, Window,
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextureHandle,
+    TopBottomPanel, Ui, Window,
 };
 
 #[derive(Default)]
@@ -25,11 +25,13 @@ pub struct RustreamApp {
     address_text: String,                        // Text input for the receiver mode
     preview_active: bool,
     is_selecting: bool,
-    drag_start: Option<Pos2>,
+    // drag_start: Option<Pos2>,
     capture_area: Option<CaptureArea>,
-    new_capture_area: Option<Rect>,
+    // new_capture_area: Option<Rect>,
     show_config: bool,
     hotkey_manager: HotkeyManager,
+    editing_hotkey: Option<HotkeyAction>,
+    // show_hotkey_modal: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -69,7 +71,7 @@ const TEXTURE_LIST: &[TextureResource] = &[
 
 const NUM_TEXTURES: usize = TEXTURE_LIST.len();
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Copy, Clone)]
 pub enum PageView {
     #[default]
     HomePage,
@@ -132,15 +134,63 @@ impl RustreamApp {
         self.page = page;
     }
 
+    fn should_handle_hotkeys(&self) -> bool {
+        // Don't handle hotkeys if editing them
+        if self.editing_hotkey.is_some() {
+            return false;
+        }
+
+        // Don't handle hotkeys if config window is open
+        if self.show_config {
+            return false;
+        }
+
+        true
+    }
+
     fn handle_hotkey(&mut self, action: HotkeyAction) {
-        match action {
-            HotkeyAction::TogglePreview => {
-                self.preview_active = !self.preview_active;
+        if !self.should_handle_hotkeys() {
+            // Allow CloseWindow action even when other hotkeys are disabled
+            if let HotkeyAction::ClosePopup = action {
+                if self.show_config {
+                    self.show_config = false;
+                    return;
+                }
+                // Add other window closing logic here
+                return;
             }
-            HotkeyAction::Quit => {
+            return;
+        }
+
+        // Then handle based on current page context
+        match (self.page, action) {
+            // Global actions (work on any page)
+            (_, HotkeyAction::Quit) => {
                 self.exit();
             }
-            _ => {} // Handle other actions as they're added
+
+            // Caster page specific actions
+            (PageView::Caster, HotkeyAction::TogglePreview) => {
+                self.preview_active = !self.preview_active;
+            }
+            (PageView::Caster, HotkeyAction::ToggleStreaming) => {
+                // Handle streaming toggle
+            }
+            // TODO: Change to receiver page when implemented
+            (PageView::Caster, HotkeyAction::StartRecording) => {
+                if self.video_recorder.is_finalizing() {
+                    return;
+                }
+
+                if self.video_recorder.is_recording() {
+                    self.video_recorder.stop();
+                } else {
+                    self.video_recorder.start();
+                }
+            }
+
+            // Ignore actions that don't apply to current context
+            _ => {}
         }
     }
 
@@ -167,7 +217,7 @@ impl RustreamApp {
 
         Window::new("Configuration")
             .open(&mut show_config)
-            .resizable(false)
+            .resizable(true)
             .movable(true)
             .frame(
                 egui::Frame::window(&ctx.style())
@@ -235,68 +285,164 @@ impl RustreamApp {
                 // TODO: Select capture area
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
-                if self.is_selecting {
-                    // TODO: Select capture area
-                    // display a rectangle to show the selected area
-                    let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
+                // if self.is_selecting {
+                //     // TODO: Select capture area
+                //     // display a rectangle to show the selected area
+                //     let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
 
-                    // display a rectangle to show the selected area
-                    if response.drag_started() {
-                        self.drag_start = Some(response.interact_pointer_pos().unwrap());
-                    }
+                //     // display a rectangle to show the selected area
+                //     if response.drag_started() {
+                //         self.drag_start = Some(response.interact_pointer_pos().unwrap());
+                //     }
 
-                    if let Some(start) = self.drag_start {
-                        if let Some(current) = response.interact_pointer_pos() {
-                            self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
-                            // Draw the selection rectangle
-                            if let Some(rect) = self.new_capture_area {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    0.0,
-                                    egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                                );
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    0.0,
-                                    egui::Stroke::new(2.0, egui::Color32::GREEN),
-                                );
-                            }
-                        }
-                    }
+                //     if let Some(start) = self.drag_start {
+                //         if let Some(current) = response.interact_pointer_pos() {
+                //             self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                //             // Draw the selection rectangle
+                //             if let Some(rect) = self.new_capture_area {
+                //                 ui.painter().rect_filled(
+                //                     rect,
+                //                     0.0,
+                //                     egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                //                 );
+                //                 ui.painter().rect_stroke(
+                //                     rect,
+                //                     0.0,
+                //                     egui::Stroke::new(2.0, egui::Color32::GREEN),
+                //                 );
+                //             }
+                //         }
+                //     }
 
-                    // OK button to confirm selection
-                    if self.new_capture_area.is_some() && ui.button("OK").clicked() {
-                        let rect = self.new_capture_area.unwrap();
-                        self.capture_area = Some(CaptureArea::new(
-                            rect.min.x as usize,
-                            rect.min.y as usize,
-                            rect.width() as usize,
-                            rect.height() as usize,
-                        ));
-                        log::debug!(
-                            "Capture Area: x:{}, y:{}, width:{}, height:{}",
-                            self.capture_area.unwrap().x,
-                            self.capture_area.unwrap().y,
-                            self.capture_area.unwrap().width,
-                            self.capture_area.unwrap().height
-                        );
-                        self.is_selecting = false;
-                        self.drag_start = None;
-                        self.new_capture_area = None;
-                    }
-                    // Cancel selection
-                    if ui.button("Cancel").clicked() {
-                        self.is_selecting = false;
-                        self.new_capture_area = None;
-                        self.drag_start = None;
-                    }
-                }
+                //     // OK button to confirm selection
+                //     if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                //         let rect = self.new_capture_area.unwrap();
+                //         self.capture_area = Some(CaptureArea::new(
+                //             rect.min.x as usize,
+                //             rect.min.y as usize,
+                //             rect.width() as usize,
+                //             rect.height() as usize,
+                //         ));
+                //         log::debug!(
+                //             "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                //             self.capture_area.unwrap().x,
+                //             self.capture_area.unwrap().y,
+                //             self.capture_area.unwrap().width,
+                //             self.capture_area.unwrap().height
+                //         );
+                //         self.is_selecting = false;
+                //         self.drag_start = None;
+                //         self.new_capture_area = None;
+                //     }
+                //     // Cancel selection
+                //     if ui.button("Cancel").clicked() {
+                //         self.is_selecting = false;
+                //         self.new_capture_area = None;
+                //         self.drag_start = None;
+                //     }
+                // }
 
                 // Update capture area in config when it changes
                 if let Some(area) = self.capture_area {
                     let mut config = self.config.lock().unwrap();
                     config.capture.capture_area =
                         Some(CaptureArea::new(area.x, area.y, area.width, area.height));
+                }
+
+                // In render_config_window after the "Streaming Settings" section:
+                ui.heading("Hotkey Settings");
+                ui.separator();
+
+                // Show current hotkeys in a table
+                ui.label("Current Hotkeys:");
+                egui::Grid::new("hotkeys_grid")
+                    .num_columns(3)
+                    .spacing([40.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        // Header
+                        ui.label("Action");
+                        ui.label("Shortcut");
+                        ui.label("Controls");
+                        ui.end_row();
+
+                        // Display each hotkey
+                        self.hotkey_manager
+                            .default_shortcuts
+                            .values()
+                            .filter(|action| action.is_visible())
+                            .for_each(|action| {
+                                ui.label(action.to_string());
+
+                                // Find current combination for this action
+                                let combo_text = self
+                                    .hotkey_manager
+                                    .shortcuts
+                                    .iter()
+                                    .find(|(_, a)| *a == action)
+                                    .map(|(k, _)| {
+                                        format!(
+                                            "{}{}{}{:?}",
+                                            if k.ctrl { "Ctrl+" } else { "" },
+                                            if k.shift { "Shift+" } else { "" },
+                                            if k.alt { "Alt+" } else { "" },
+                                            k.key
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "Unassigned".to_string());
+
+                                ui.label(combo_text);
+
+                                // Edit button that opens a modal for key capture
+                                if ui.button("🖊️").clicked() {
+                                    self.editing_hotkey = Some(action.clone());
+                                }
+                                ui.end_row();
+                            });
+                    });
+
+                if let Some(editing_action) = self.editing_hotkey.clone() {
+                    Window::new("Configure Hotkey")
+                        .collapsible(false)
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            ui.label(format!(
+                                "Press new key combination for {:?}",
+                                editing_action
+                            ));
+                            ui.label("Press Esc to cancel");
+
+                            // Capture key input
+                            let input = ui.input(|i| {
+                                (
+                                    i.modifiers.ctrl,
+                                    i.modifiers.shift,
+                                    i.modifiers.alt,
+                                    i.keys_down.iter().next().copied(),
+                                )
+                            });
+
+                            if let (ctrl, shift, alt, Some(key)) = input {
+                                if key == egui::Key::Escape {
+                                    self.editing_hotkey = None;
+                                } else {
+                                    let new_combination = KeyCombination {
+                                        ctrl,
+                                        shift,
+                                        alt,
+                                        key,
+                                    };
+                                    self.hotkey_manager
+                                        .register_shortcut(new_combination, editing_action);
+                                    self.editing_hotkey = None;
+                                }
+                            }
+                        });
+                }
+
+                // Reset button
+                if ui.button("Reset to Default Hotkeys").clicked() {
+                    self.hotkey_manager.reset_to_defaults();
                 }
 
                 ui.heading("Recording Settings");
@@ -352,19 +498,19 @@ impl RustreamApp {
                         });
                 });
 
-                // Audio settings
-                ui.heading("Audio Settings");
-                ui.separator();
+                // // Audio settings
+                // ui.heading("Audio Settings");
+                // ui.separator();
 
-                // let mut config = self.config.lock().unwrap();
-                ui.checkbox(&mut config.audio.enabled, "Enable Audio");
-                if config.audio.enabled {
-                    ui.add(
-                        egui::Slider::new(&mut config.audio.volume, 0.0..=1.0)
-                            .text("Volume")
-                            .step_by(0.1),
-                    );
-                }
+                // // let mut config = self.config.lock().unwrap();
+                // ui.checkbox(&mut config.audio.enabled, "Enable Audio");
+                // if config.audio.enabled {
+                //     ui.add(
+                //         egui::Slider::new(&mut config.audio.volume, 0.0..=1.0)
+                //             .text("Volume")
+                //             .step_by(0.1),
+                //     );
+                // }
 
                 // Apply changes if the config has changed
                 let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
