@@ -134,63 +134,45 @@ impl RustreamApp {
         self.page = page;
     }
 
-    fn should_handle_hotkeys(&self) -> bool {
-        // Don't handle hotkeys if editing them
+    fn handle_hotkey(&mut self, action: &HotkeyAction) {
+        // First check if we should block all hotkeys
         if self.editing_hotkey.is_some() {
-            return false;
-        }
-
-        // Don't handle hotkeys if config window is open
-        if self.show_config {
-            return false;
-        }
-
-        true
-    }
-
-    fn handle_hotkey(&mut self, action: HotkeyAction) {
-        if !self.should_handle_hotkeys() {
-            // Allow CloseWindow action even when other hotkeys are disabled
-            if let HotkeyAction::ClosePopup = action {
-                if self.show_config {
-                    self.show_config = false;
-                    return;
-                }
-                // Add other window closing logic here
-                return;
-            }
             return;
         }
 
-        // Then handle based on current page context
-        match (self.page, action) {
-            // Global actions (work on any page)
-            (_, HotkeyAction::Quit) => {
-                self.exit();
-            }
-
-            // Caster page specific actions
-            (PageView::Caster, HotkeyAction::TogglePreview) => {
-                self.preview_active = !self.preview_active;
-            }
-            (PageView::Caster, HotkeyAction::ToggleStreaming) => {
-                // Handle streaming toggle
-            }
-            // TODO: Change to receiver page when implemented
-            (PageView::Caster, HotkeyAction::StartRecording) => {
-                if self.video_recorder.is_finalizing() {
-                    return;
-                }
-
-                if self.video_recorder.is_recording() {
-                    self.video_recorder.stop();
-                } else {
-                    self.video_recorder.start();
+        match action {
+            // UI Actions (highest priority)
+            HotkeyAction::ClosePopup => {
+                if self.show_config {
+                    self.show_config = false;
                 }
             }
 
-            // Ignore actions that don't apply to current context
-            _ => {}
+            // Global Actions
+            HotkeyAction::Quit => self.exit(),
+
+            // Page Specific Actions
+            action => {
+                match (self.page, action) {
+                    (PageView::Caster, HotkeyAction::TogglePreview) => {
+                        self.preview_active = !self.preview_active;
+                    }
+
+                    // TODO: change to receiver page when it is implemented
+                    (PageView::Caster, HotkeyAction::StartRecording) => {
+                        if !self.video_recorder.is_finalizing() {
+                            if self.video_recorder.is_recording() {
+                                self.video_recorder.stop();
+                            } else {
+                                self.video_recorder.start();
+                            }
+                        }
+                    }
+                    _ => {
+                        log::info!("Action not applicable to current page: {}", action);
+                    } // Ignore actions not applicable to current page
+                }
+            }
         }
     }
 
@@ -710,7 +692,7 @@ impl RustreamApp {
 impl eframe::App for RustreamApp {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         if let Some(action) = self.hotkey_manager.handle_input(ctx) {
-            self.handle_hotkey(action);
+            self.handle_hotkey(&action);
         }
         TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal(|ui| {
