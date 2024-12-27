@@ -125,6 +125,12 @@ impl HotkeyManager {
         self.shortcuts = self.default_shortcuts.clone();
     }
 
+    pub fn is_default(&self, combination: &KeyCombination, action: &HotkeyAction) -> bool {
+        self.default_shortcuts
+            .get(combination)
+            .map_or(false, |default_action| default_action == action)
+    }
+
     pub fn handle_input(&mut self, ui: &egui::Context) -> Option<HotkeyAction> {
         let input = ui.input(|i| {
             (
@@ -176,6 +182,17 @@ impl HotkeyManager {
 
         // Add new binding
         self.shortcuts.insert(combination, action);
+    }
+    pub fn reset_action(&mut self, action: &HotkeyAction) {
+        // Remove current binding for this action
+        self.shortcuts.retain(|_, a| a != action);
+
+        // Find default combination for this action
+        if let Some((default_combo, _)) = self.default_shortcuts.iter().find(|(_, a)| *a == action)
+        {
+            // Restore to default
+            self.shortcuts.insert(default_combo.clone(), action.clone());
+        }
     }
 
     pub fn reset_to_defaults(&mut self) {

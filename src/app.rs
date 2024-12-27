@@ -367,30 +367,49 @@ impl RustreamApp {
                         ui.end_row();
 
                         // Display each hotkey
-                        self.hotkey_manager
+                        let actions: Vec<_> = self
+                            .hotkey_manager
                             .default_shortcuts
                             .values()
                             .filter(|action| action.is_visible())
-                            .for_each(|action| {
-                                ui.label(action.to_string());
+                            .cloned()
+                            .collect();
 
-                                // Find current combination for this action
-                                let combo_text = self
-                                    .hotkey_manager
-                                    .shortcuts
-                                    .iter()
-                                    .find(|(_, a)| *a == action)
-                                    .map(|(k, _)| k.to_string())
-                                    .unwrap_or_else(|| "Unassigned".to_string());
+                        actions.iter().for_each(|action| {
+                            ui.label(action.to_string());
 
-                                ui.label(combo_text);
+                            // Find current combination and check if default
+                            let (combo_text, is_default) = self
+                                .hotkey_manager
+                                .shortcuts
+                                .iter()
+                                .find(|(_, a)| *a == action)
+                                .map(|(k, _)| {
+                                    let text = k.to_string();
+                                    let is_default = self.hotkey_manager.is_default(k, action);
+                                    (
+                                        if is_default {
+                                            RichText::new(text)
+                                        } else {
+                                            RichText::new(text).strong()
+                                        },
+                                        is_default,
+                                    )
+                                })
+                                .unwrap_or_else(|| (RichText::new("Unassigned"), true));
 
-                                // Edit button that opens a modal for key capture
-                                if ui.button("🖊️").clicked() {
+                            ui.label(combo_text);
+
+                            ui.horizontal(|ui| {
+                                if ui.button("🖊").clicked() {
                                     self.editing_hotkey = Some(action.clone());
                                 }
-                                ui.end_row();
+                                ui.add_enabled(!is_default, egui::Button::new("↺"))
+                                    .clicked()
+                                    .then(|| self.hotkey_manager.reset_action(action));
                             });
+                            ui.end_row();
+                        });
                     });
 
                 if let Some(editing_action) = self.editing_hotkey.clone() {
