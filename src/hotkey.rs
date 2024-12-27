@@ -22,8 +22,7 @@ pub struct KeyCombination {
 pub struct HotkeyManager {
     shortcuts: HashMap<KeyCombination, HotkeyAction>,
     default_shortcuts: HashMap<KeyCombination, HotkeyAction>,
-    last_trigger: Option<Instant>,
-    cooldown: Duration,
+    current_combination: Option<KeyCombination>,
 }
 
 impl HotkeyManager {
@@ -31,8 +30,7 @@ impl HotkeyManager {
         let mut manager = Self {
             shortcuts: HashMap::new(),
             default_shortcuts: HashMap::new(),
-            last_trigger: None,
-            cooldown: Duration::from_millis(200),
+            current_combination: None,
         };
         manager.setup_default_shortcuts();
         manager
@@ -73,14 +71,7 @@ impl HotkeyManager {
         self.shortcuts = self.default_shortcuts.clone();
     }
 
-    pub fn handle_input(&self, ui: &egui::Context) -> Option<HotkeyAction> {
-        let now = Instant::now();
-        if let Some(last) = self.last_trigger {
-            if now - last < self.cooldown {
-                return None;
-            }
-        }
-
+    pub fn handle_input(&mut self, ui: &egui::Context) -> Option<HotkeyAction> {
         let input = ui.input(|i| {
             (
                 i.modifiers.ctrl,
@@ -91,16 +82,22 @@ impl HotkeyManager {
         });
 
         if let (ctrl, shift, alt, Some(key)) = input {
-            let combination = KeyCombination {
+            let new_combination = KeyCombination {
                 ctrl,
                 shift,
                 alt,
                 key,
             };
-            self.shortcuts.get(&combination).cloned()
+
+            if self.current_combination.as_ref() != Some(&new_combination) {
+                self.current_combination = Some(new_combination.clone());
+                return self.shortcuts.get(&new_combination).cloned();
+            }
         } else {
-            None
+            // Reset when no keys are pressed
+            self.current_combination = None;
         }
+        None
     }
 
     pub fn register_shortcut(&mut self, combination: KeyCombination, action: HotkeyAction) {
