@@ -20,6 +20,7 @@ use egui::{
 
 use std::process::Command;
 use std::env;
+use std::io::Write;
 
 lazy_static! {
     pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> = Arc::new(Mutex::new(CaptureArea::default()));
@@ -42,6 +43,7 @@ pub struct RustreamApp {
     new_capture_area: Option<Rect>,
     show_config: bool,
     secondary_window_open: bool,
+    show_popup: bool,
 }
 
 #[derive(Default)]
@@ -696,111 +698,120 @@ impl SecondaryApp {
     }
 }
 
-
 impl eframe::App for SecondaryApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut app = self.rustream_app.lock().unwrap();
-
-        // Uso un TopBottomPanel per l'intestazione e i pulsanti
-        TopBottomPanel::top("top_panel")
-            .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Resize Area for Streaming");
-                    
-                    // Pulsanti OK e Annulla accanto all'intestazione
-                    if ui.button("OK").clicked() {
-                        if let Some(rect) = app.new_capture_area {
-                           let output = CaptureArea::new(
-                                rect.min.x as usize,
-                                rect.min.y as usize,
-                                rect.width() as usize,
-                                rect.height() as usize,
-                            );
-                            let serialized = serde_json::to_string(&output).unwrap();
-                            println!("{}", serialized);
-                            log::debug!(
-                                "Capture Area: x:{}, y:{}, width:{}, height:{}",
-                                app.capture_area.unwrap().x,
-                                app.capture_area.unwrap().y,
-                                app.capture_area.unwrap().width,
-                                app.capture_area.unwrap().height
-                            );
-                        }
-                        // Reset states
-                        app.is_selecting = false;
-                        app.drag_start = None;
-                        //app.new_capture_area = None;
-                        //let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
-                        //*area = app.capture_area.unwrap();
-                        //println!("this is the global variable: {:?}", *area);
-                        // Exit app
-                        std::process::exit(0);
-                    }
-
-                    if ui.button("Cancel").clicked() {
-                        app.is_selecting = false;
-                        //app.new_capture_area = None;
-                        app.drag_start = None;
-                    }
-                });
-            });
-
-        // Il pannello centrale rimane trasparente
+        
+        // Get screen info and scaling
+        let screen_rect = ctx.screen_rect();
+        let window_pos = screen_rect.min;
+        let scale_factor = ctx.pixels_per_point();
+        
         CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
 
+                // Handle drag start
                 if response.drag_started() {
-                    app.drag_start = Some(response.interact_pointer_pos().unwrap());
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let screen_pos = egui::pos2(
+                            pos.x * scale_factor,
+                            pos.y * scale_factor
+                        );
+                        app.drag_start = Some(screen_pos);
+                    }
+                    app.show_popup = false;
                 }
 
+                // Handle dragging and drawing
                 if let Some(start) = app.drag_start {
                     if let Some(current) = response.interact_pointer_pos() {
-                        app.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                        let screen_pos = egui::pos2(
+                            current.x * scale_factor,
+                            current.y * scale_factor
+                        );
+                        app.new_capture_area = Some(egui::Rect::from_two_pos(start, screen_pos));
+                        
                         if let Some(rect) = app.new_capture_area {
+                            let display_rect = egui::Rect::from_min_max(
+                                egui::pos2(rect.min.x/scale_factor, rect.min.y/scale_factor),
+                                egui::pos2(rect.max.x/scale_factor, rect.max.y/scale_factor)
+                            );
+
                             ui.painter().rect_filled(
-                                rect,
+                                display_rect,
                                 0.0,
                                 egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
                             );
                             ui.painter().rect_stroke(
-                                rect,
+                                display_rect,
                                 0.0,
                                 egui::Stroke::new(2.0, egui::Color32::GREEN),
                             );
                         }
                     }
+
+                    if response.drag_released() {
+                        app.show_popup = true;
+                    }
                 }
 
-                if app.new_capture_area.is_some() && ui.button("OK").clicked() {
+                // Show centered popup
+                if app.show_popup && app.new_capture_area.is_some() {
                     let rect = app.new_capture_area.unwrap();
-                    //println!("sono qua");
-                    app.capture_area = Some(CaptureArea::new(
-                        rect.min.x as usize,
-                        rect.min.y as usize,
-                        rect.width() as usize,
-                        rect.height() as usize,
-                    ));
-                    log::debug!(
-                        "Capture Area: x:{}, y:{}, width:{}, height:{}",
-                        app.capture_area.unwrap().x,
-                        app.capture_area.unwrap().y,
-                        app.capture_area.unwrap().width,
-                        app.capture_area.unwrap().height
-                    );
-                    
-                    // Reset states
-                    app.is_selecting = false;
-                    app.drag_start = None;
-                    //app.new_capture_area = None;
-                }
+                    egui::Window::new("Confirm Selection")
+                        .fixed_size([300.0, 150.0])
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .resizable(false)
+                        .collapsible(false)
+                        .show(ctx, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(20.0);
+                                ui.heading("Do you want to confirm this selection?");
+                                ui.add_space(30.0);
+                                
+                                let total_width = 240.0;
+                                let button_width = 100.0;
+                                let spacing = (total_width - (2.0 * button_width)) / 2.0;
+                                
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(total_width, 40.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        if ui.add_sized([button_width, 40.0], egui::Button::new("OK")).clicked() {
+                                            // Convert to actual screen coordinates
+                                            let output = CaptureArea::new(
+                                                (rect.min.x).round() as usize,
+                                                (rect.min.y).round() as usize,
+                                                (rect.width()).round() as usize,
+                                                (rect.height()).round() as usize,
+                                            );
 
-                if ui.button("Cancel").clicked() {
-                    app.is_selecting = false;
-                    //app.new_capture_area = None;
-                    app.drag_start = None;
+                                            let serialized = serde_json::to_string(&output).unwrap();
+                                            println!("{}\n", serialized); // Add newline
+                                            std::io::stdout().flush().unwrap();
+                                            
+                                            app.capture_area = Some(output);
+                                            app.show_popup = false;
+                                            app.is_selecting = false;
+                                            app.drag_start = None;
+                                            app.new_capture_area = None;
+                                            std::process::exit(0);
+                                        }
+
+                                        ui.add_space(spacing);
+                                        
+                                        if ui.add_sized([button_width, 40.0], egui::Button::new("Cancel")).clicked() {
+                                            app.show_popup = false;
+                                            app.is_selecting = false;
+                                            app.drag_start = None;
+                                            app.new_capture_area = None;
+                                        }
+                                    }
+                                );
+                            });
+                        });
                 }
             });
     }
