@@ -1,7 +1,7 @@
 mod capturer;
 mod frame;
 
-pub use capturer::{CaptureError, ScreenCapture};
+pub use capturer::ScreenCapture;
 pub use frame::CapturedFrame;
 
 // Common types used by both modules

@@ -1,4 +1,4 @@
-use super::{BgraBuffer, CaptureArea, CapturedFrame};
+use super::{CaptureArea, CapturedFrame};
 use crate::config::Config;
 use scrap::{Capturer, Display};
 use std::sync::{Arc, Mutex};
@@ -55,7 +55,7 @@ impl ScreenCapture {
         &self.monitors
     }
 
-    pub fn capture_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
+    pub fn next_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
         if self.capturer.is_none() {
             let monitor = match get_monitor_from_index(
                 self.config.lock().unwrap().capture.selected_monitor,

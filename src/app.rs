@@ -569,7 +569,7 @@ impl RustreamApp {
 
         ui.vertical_centered(|ui| {
             if self.preview_active {
-                if let Some(display_frame) = self.frame_grabber.capture_frame(self.capture_area) {
+                if let Some(display_frame) = self.frame_grabber.next_frame(self.capture_area) {
                     // Record if active
                     if self.video_recorder.is_recording() {
                         self.video_recorder.record_frame(&display_frame);
