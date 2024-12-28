@@ -210,6 +210,13 @@ impl HotkeyManager {
     pub fn reset_to_defaults(&mut self) {
         self.shortcuts = self.default_shortcuts.clone();
     }
+
+    pub fn get_shortcut_text(&self, action: &HotkeyAction) -> Option<String> {
+        self.shortcuts
+            .iter()
+            .find(|(_, a)| *a == action)
+            .map(|(k, _)| format!("{}", k))
+    }
 }
 
 impl std::fmt::Display for KeyCombination {

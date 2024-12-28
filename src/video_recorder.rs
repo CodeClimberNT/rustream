@@ -1,5 +1,5 @@
 use crate::config::{Config, VideoConfig};
-use crate::frame_grabber::CapturedFrame;
+use crate::screen_capture::CapturedFrame;
 
 use std::time::{Duration, Instant};
 use std::{

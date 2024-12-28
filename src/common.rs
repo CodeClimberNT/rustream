@@ -1,4 +1,5 @@
-// use serde::{Deserialize, Serialize};
+pub type RgbaBuffer = Vec<u8>;
+pub type BgraBuffer = Vec<u8>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CaptureArea {

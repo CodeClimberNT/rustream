@@ -1,12 +1,6 @@
-use crate::{common::CaptureArea, config::Config};
+use super::{BgraBuffer, CaptureArea, RgbaBuffer};
 use image::{ImageBuffer, RgbaImage};
-
-use std::sync::{Arc, Mutex};
-
-use scrap::{Capturer, Display};
-
-type RgbaBuffer = Vec<u8>;
-type BgraBuffer = Vec<u8>;
+use std::sync::Arc;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
@@ -80,7 +74,7 @@ impl CapturedFrame {
         (rgba_data, crop.width, crop.height)
     }
 
-    fn from_bgra_buffer(
+    pub fn from_bgra_buffer(
         buffer_bgra: BgraBuffer,
         buffer_width: usize,
         buffer_height: usize,
@@ -109,115 +103,3 @@ impl CapturedFrame {
     }
 }
 
-pub struct FrameGrabber {
-    config: Arc<Mutex<Config>>, // Reference to shared config
-    monitors: Vec<String>,
-    capturer: Option<Capturer>,
-    width: usize,
-    height: usize,
-    // stride: usize,
-}
-
-impl Default for FrameGrabber {
-    fn default() -> Self {
-        Self::new(Arc::new(Mutex::new(Config::default())))
-    }
-}
-
-impl FrameGrabber {
-    pub fn new(config: Arc<Mutex<Config>>) -> Self {
-        let mut monitors_list: Vec<String> = Vec::new();
-        if let Ok(displays) = get_monitors() {
-            for (i, _monitor) in displays.iter().enumerate() {
-                monitors_list.push(format!("Monitor {}", i));
-            }
-        }
-
-        Self {
-            config,
-            monitors: monitors_list,
-            capturer: None,
-            width: 0,
-            height: 0,
-            // stride: 0,
-        }
-    }
-
-    pub fn reset_capture(&mut self) {
-        self.capturer = None;
-        self.width = 0;
-        self.height = 0;
-    }
-
-    pub fn get_monitors(&self) -> &Vec<String> {
-        &self.monitors
-    }
-
-    pub fn capture_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
-        if self.capturer.is_none() {
-            let monitor = match get_monitor_from_index(
-                self.config.lock().unwrap().capture.selected_monitor,
-            ) {
-                Ok(m) => m,
-                Err(_) => return None,
-            };
-
-            self.height = monitor.height();
-            self.width = monitor.width();
-            log::debug!("Monitor dimensions: {}x{}", self.width, self.height);
-
-            self.capturer = match Capturer::new(monitor) {
-                Ok(cap) => Some(cap),
-                Err(e) => {
-                    log::error!("Capturer could not be initialized: {}", e);
-                    return None;
-                }
-            };
-        }
-
-        let capturer = self.capturer.as_mut()?;
-
-        match capturer.frame() {
-            Ok(raw_frame) => Some(CapturedFrame::from_bgra_buffer(
-                raw_frame.to_vec(),
-                self.width,
-                self.height,
-                capture_area,
-            )),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock => {
-                    log::debug!("Frame not ready; skipping this frame.");
-                    None
-                }
-                _ => {
-                    log::error!(
-                        r"Strange Error: {e}.
-                        Resetting capturer."
-                    );
-                    self.reset_capture();
-                    None
-                }
-            },
-        }
-    }
-}
-
-fn get_monitors() -> Result<Vec<Display>, ()> {
-    let monitors: Vec<Display> = Display::all().expect("Couldn't find any display.");
-    if monitors.is_empty() {
-        return Err(());
-    }
-
-    Ok(monitors)
-}
-
-pub fn get_monitor_from_index(index: usize) -> Result<Display, ()> {
-    let mut monitors = get_monitors().unwrap();
-
-    if index >= monitors.len() {
-        return Err(());
-    }
-
-    let monitor: Display = monitors.remove(index);
-    Ok(monitor)
-}

@@ -5,7 +5,7 @@ mod app;
 // mod audio_capture;
 mod common;
 mod config;
-mod frame_grabber;
+mod screen_capture;
 mod hotkey;
 mod video_recorder;
 

@@ -56,6 +56,7 @@
     ], default-features = false }
 serde = "1.0.216"
 serde_json = "1.0.134"
+thiserror = "2.0.9"
 
 
 [profile.dev]

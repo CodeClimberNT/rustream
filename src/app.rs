@@ -1,7 +1,7 @@
 use crate::common::CaptureArea;
 use crate::config::Config;
-use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
+use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::video_recorder::VideoRecorder;
 
 use std::collections::HashMap;
@@ -9,14 +9,14 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Frame, Rect, RichText,
-    TextureHandle, TopBottomPanel, Ui, Window,
+    CentralPanel, ColorImage, ComboBox, Context, Rect, RichText, TextureHandle, TopBottomPanel, Ui,
+    Window,
 };
 
 #[derive(Default)]
 pub struct RustreamApp {
     config: Arc<Mutex<Config>>,
-    frame_grabber: FrameGrabber,
+    frame_grabber: ScreenCapture,
     video_recorder: VideoRecorder,
     page: PageView,                              // Enum to track modes
     display_texture: Option<TextureHandle>,      // Texture for the screen capture
@@ -104,7 +104,7 @@ impl RustreamApp {
         );
 
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
-        let frame_grabber: FrameGrabber = FrameGrabber::new(config.clone());
+        let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
         let video_recorder: VideoRecorder = VideoRecorder::new(config.clone());
 
         RustreamApp {
@@ -132,6 +132,20 @@ impl RustreamApp {
 
     fn set_page(&mut self, page: PageView) {
         self.page = page;
+    }
+
+    fn render_header(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            // Home button on the left
+            let home_text = RichText::new("🏠").size(24.0);
+            if self.clickable_element(ui, home_text, HotkeyAction::Home, false) {
+                self.reset_ui();
+            }
+
+            // ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Add any other Left to right elements here
+            // });
+        });
     }
 
     fn home_page(&mut self, ui: &mut egui::Ui) {
@@ -517,7 +531,7 @@ impl RustreamApp {
             }
         }
     }
-    fn render_caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         ui.heading("Monitor Feedback");
         ui.separator();
         ui.vertical_centered(|ui| {
@@ -595,7 +609,7 @@ impl RustreamApp {
         });
     }
 
-    pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
+    pub fn receiver_page(&mut self, ui: &mut egui::Ui) {
         ui.disable();
         ui.heading("Receiver Mode");
         ui.vertical_centered(|ui| {
@@ -619,13 +633,12 @@ impl RustreamApp {
         let alt_pressed = ui.input(|i| i.modifiers.alt);
 
         // Get hotkey text if exists
-        let hotkey_text = self
-            .hotkey_manager
-            .shortcuts
-            .iter()
-            .find(|(_, a)| **a == action)
-            .map(|(k, _)| format!(" ({})", k))
-            .unwrap_or_default();
+        let hotkey_text = format!(
+            " ({})",
+            self.hotkey_manager
+                .get_shortcut_text(&action)
+                .unwrap_or_default()
+        );
 
         // Create full text for size calculation
         let full_text = format!("{}{}", label, hotkey_text);
@@ -655,29 +668,33 @@ impl RustreamApp {
             || self.triggered_actions.contains(&action)
     }
 
-    fn clickable_title(&mut self, ui: &mut egui::Ui, text: &str, action: HotkeyAction) -> bool {
-        let alt_pressed = ui.input(|i| i.modifiers.alt);
-        let hotkey = self
-            .hotkey_manager
-            .shortcuts
-            .iter()
-            .find(|(_, a)| **a == action)
-            .map(|(k, _)| format!(" ({})", k))
-            .unwrap_or_default();
+    fn clickable_element<T>(
+        &mut self,
+        ui: &mut egui::Ui,
+        label: T,
+        action: HotkeyAction,
+        show_hotkey: bool,
+    ) -> bool
+    where
+        T: Into<RichText>,
+    {
+        let alt_pressed: bool = ui.input(|i| i.modifiers.alt);
+
+        let base_text: RichText = label.into();
+
+        // Only show hotkey if enabled and alt is pressed
+        let combined_text = if show_hotkey && alt_pressed {
+            if let Some(hotkey) = self.hotkey_manager.get_shortcut_text(&action) {
+                RichText::new(format!("{}{}", base_text.text(), hotkey))
+            } else {
+                base_text
+            }
+        } else {
+            base_text
+        };
 
         let response = ui
-            .add(
-                egui::Label::new(
-                    RichText::new(if alt_pressed {
-                        format!("{}{}", text, hotkey)
-                    } else {
-                        text.to_string()
-                    })
-                    .font(FontId::proportional(40.0))
-                    .color(Color32::GOLD),
-                )
-                .sense(egui::Sense::click()),
-            )
+            .add(egui::Label::new(combined_text))
             .on_hover_cursor(egui::CursorIcon::PointingHand);
 
         response.clicked() || self.triggered_actions.contains(&action)
@@ -739,24 +756,21 @@ impl eframe::App for RustreamApp {
             self.triggered_actions.push(action);
         }
         TopBottomPanel::top("header")
-            .frame(
-                Frame::none()
-                    .fill(ctx.style().visuals.window_fill())
-                    .inner_margin(8.0),
-            )
+            // .frame(
+            //     Frame::none()
+            //         .fill(ctx.style().visuals.window_fill())
+            //         .inner_margin(8.0),
+            // )
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    if self.clickable_title(ui, "Welcome to RUSTREAM!", HotkeyAction::Home) {
-                        self.reset_ui();
-                    }
-                });
+                self.render_header(ui);
             });
+
         CentralPanel::default().show(ctx, |ui| match self.page {
             PageView::HomePage => self.home_page(ui),
 
-            PageView::Caster => self.render_caster_page(ui, ctx, frame),
+            PageView::Caster => self.caster_page(ui, ctx, frame),
 
-            PageView::Receiver => self.render_receiver_mode(ui),
+            PageView::Receiver => self.receiver_page(ui),
         });
 
         self.triggered_actions.clear();
