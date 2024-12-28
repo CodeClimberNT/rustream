@@ -17,7 +17,7 @@ caster or as a receiver. In the latter case, the user should be able to specify 
 caster it should connect to.
 4. [ ] Selection Options: When in casting mode, the utility should allow the user to restrict the
 grabbed content to a custom area.
-5. [ ] Hotkey Support: The utility should support customizable keyboard shortcuts for
+5. [x] Hotkey Support: The utility should support customizable keyboard shortcuts for
 pausing/resuming the transmission, for blanking the screen and terminating the current session.
 
 
@@ -26,7 +26,7 @@ pausing/resuming the transmission, for blanking the screen and terminating the c
 6. [ ] Annotation Tools: When in casting mode, the utility can activate/deactivate a transparent
 layer on top of the grabbed area where annotations like shapes, arrows, text, …, can be
 superimposed to the original content.
-7. [ ] Save Options: When in receiving mode, the utility should allow users to record the received
+7. [x] Save Options: When in receiving mode, the utility should allow users to record the received
 content to a video file.
 8. [x] Multi-monitor Support: The utility should be able to recognize and handle
 multiple monitors independently, allowing users to cast content from any of the connected
