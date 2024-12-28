@@ -248,14 +248,14 @@ impl RustreamApp {
                             if output.status.success() {
                                 // Parse stdout with error handling
                                 let stdout = std::str::from_utf8(&output.stdout).unwrap_or_else(|e| {
-                                    eprintln!("Failed to read stdout: {}", e);
+                                    log::error!("Failed to read stdout: {}", e);
                                     ""
                                 });
                                 println!("Main process received: {}", stdout);
                             
                                 // Parse JSON with detailed error handling
                                 let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap_or_else(|e| {
-                                    eprintln!("Failed to parse JSON response: {}", e);
+                                    log::error!("Failed to parse JSON response: {}", e);
                                     serde_json::json!({ "status": "error" })
                                 });
                                 
@@ -264,9 +264,9 @@ impl RustreamApp {
                                         if let Some(data) = json_response.get("data") {
                                             // Detailed error handling for struct mismatch
                                             let capture_area = serde_json::from_value(data.clone()).unwrap_or_else(|e| {
-                                                eprintln!("Failed to parse capture area data: {}", e);
-                                                eprintln!("Possible struct mismatch between SecondaryApp and main process");
-                                                eprintln!("Expected format: {{x: usize, y: usize, width: usize, height: usize}}");
+                                                log::error!("Failed to parse capture area data: {}", e);
+                                                log::error!("Possible struct mismatch between SecondaryApp and main process");
+                                                log::error!("Expected format: {{x: usize, y: usize, width: usize, height: usize}}");
                                                 None
                                             });
                                             self.capture_area = capture_area;
@@ -276,20 +276,20 @@ impl RustreamApp {
                                         println!("User cancelled the capture operation");
                                     }
                                     _ => {
-                                        eprintln!("Unknown status in response");
+                                        log::error!("Unknown status in response");
                                     }
                                 }
                             } else {
                                 // Handle process errors
                                 match std::str::from_utf8(&output.stderr) {
                                     Ok(stderr) if !stderr.is_empty() => {
-                                        eprintln!("Secondary process error: {}", stderr);
+                                        log::error!("Secondary process error: {}", stderr);
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to read stderr: {}", e);
+                                        log::error!("Failed to read stderr: {}", e);
                                     }
                                     _ => {
-                                        eprintln!("Secondary process failed with no error output");
+                                        log::error!("Secondary process failed with no error output");
                                     }
                                 }
                             }
