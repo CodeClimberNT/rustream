@@ -480,19 +480,19 @@ impl RustreamApp {
                         });
                 });
 
-                // // Audio settings
-                // ui.heading("Audio Settings");
-                // ui.separator();
+                // Audio settings
+                ui.heading("Audio Settings");
+                ui.separator();
 
-                // // let mut config = self.config.lock().unwrap();
-                // ui.checkbox(&mut config.audio.enabled, "Enable Audio");
-                // if config.audio.enabled {
-                //     ui.add(
-                //         egui::Slider::new(&mut config.audio.volume, 0.0..=1.0)
-                //             .text("Volume")
-                //             .step_by(0.1),
-                //     );
-                // }
+                // let mut config = self.config.lock().unwrap();
+                ui.checkbox(&mut config.audio.enabled, "Enable Audio");
+                if config.audio.enabled {
+                    ui.add(
+                        egui::Slider::new(&mut config.audio.volume, 0.0..=1.0)
+                            .text("Volume")
+                            .step_by(0.1),
+                    );
+                }
 
                 // Apply changes if the config has changed
                 let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
