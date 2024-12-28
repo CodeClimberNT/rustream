@@ -8,11 +8,32 @@ use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+
+use eframe::egui_wgpu::capture;
+use egui_overlay::EguiOverlay;
+use lazy_static::lazy_static;
+use serde_json::json;
+
 use eframe::egui;
 use egui::{
     CentralPanel, ColorImage, ComboBox, Context, Rect, RichText, TextureHandle, TopBottomPanel, Ui,
     Window,
 };
+
+
+use std::process::Command;
+use std::env;
+use std::io::Write;
+
+lazy_static! {
+    pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> = Arc::new(Mutex::new(CaptureArea::default()));
+}
+
+
+use std::process::Command;
+use std::env;
+use std::io::Write;
+
 
 pub struct RustreamApp {
     config: Arc<Mutex<Config>>,
@@ -33,6 +54,55 @@ pub struct RustreamApp {
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
     triggered_actions: Vec<HotkeyAction>,
+    secondary_window_open: bool,
+    show_popup: bool,
+}
+
+#[derive(Default)]
+struct SelectionWindow {
+    drag_start: Option<egui::Pos2>,
+    new_capture_area: Option<egui::Rect>,
+}
+
+impl eframe::App for SelectionWindow {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label("Drag to select the capture area:");
+
+            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+
+            if response.drag_started() {
+                self.drag_start = Some(response.interact_pointer_pos().unwrap());
+            }
+
+            if let Some(start) = self.drag_start {
+                if let Some(current) = response.interact_pointer_pos() {
+                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                    if let Some(rect) = self.new_capture_area {
+                        ui.painter().rect_filled(
+                            rect,
+                            0.0,
+                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                        );
+                        ui.painter().rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(2.0, egui::Color32::GREEN),
+                        );
+                    }
+                }
+            }
+
+            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                println!("Capture Area Selected: {:?}", self.new_capture_area);
+                // Logica per salvare o restituire l'area selezionata
+            }
+
+            if ui.button("Cancel").clicked() {
+                // Logica per annullare la selezione
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -219,7 +289,8 @@ impl RustreamApp {
                 // Manual capture area input
                 ui.heading("Capture Area");
                 ui.horizontal(|ui| {
-                    let mut area = self.capture_area.unwrap_or_default();
+                    let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
+                    //println!("this is the global variable: {:?}", *area);
 
                     ui.vertical(|ui| {
                         // FIXME: X=0 value error
@@ -228,7 +299,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut x_str).changed() {
                             if let Ok(x) = x_str.parse() {
                                 area.x = x;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
 
@@ -237,7 +308,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut y_str).changed() {
                             if let Ok(y) = y_str.parse() {
                                 area.y = y;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
                     });
@@ -248,7 +319,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut width_str).changed() {
                             if let Ok(width) = width_str.parse() {
                                 area.width = width;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
 
@@ -257,7 +328,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut height_str).changed() {
                             if let Ok(height) = height_str.parse() {
                                 area.height = height;
-                                self.capture_area = Some(area);
+                                self.capture_area = Some(*area);
                             }
                         }
                     });
@@ -270,67 +341,132 @@ impl RustreamApp {
 
                 ui.heading("Streaming Settings");
                 ui.separator();
-
+                
                 // TODO: Select capture area
+                ui.horizontal(|ui|{
                 self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
-                // if self.is_selecting {
-                //     // TODO: Select capture area
-                //     // display a rectangle to show the selected area
-                //     let response = ui.allocate_rect(ctx.available_rect(), egui::Sense::drag());
+                if self.is_selecting {
+                     println!("{:?}", self.capture_area);
+                    //creating a transparent window with egui-overlay
+                    
 
-                //     // display a rectangle to show the selected area
-                //     if response.drag_started() {
-                //         self.drag_start = Some(response.interact_pointer_pos().unwrap());
-                //     }
+                    // Open a new full-size window for selecting capture area
+                        //check if the process with arg --secondary is opened yet
+                        
+                       let output= Command::new(env::current_exe().unwrap())
+                            .arg("--secondary")
+                            .output()
+                            .expect("failed to execute process");
 
-                //     if let Some(start) = self.drag_start {
-                //         if let Some(current) = response.interact_pointer_pos() {
-                //             self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
-                //             // Draw the selection rectangle
-                //             if let Some(rect) = self.new_capture_area {
-                //                 ui.painter().rect_filled(
-                //                     rect,
-                //                     0.0,
-                //                     egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                //                 );
-                //                 ui.painter().rect_stroke(
-                //                     rect,
-                //                     0.0,
-                //                     egui::Stroke::new(2.0, egui::Color32::GREEN),
-                //                 );
-                //             }
-                //         }
-                //     }
 
-                //     // OK button to confirm selection
-                //     if self.new_capture_area.is_some() && ui.button("OK").clicked() {
-                //         let rect = self.new_capture_area.unwrap();
-                //         self.capture_area = Some(CaptureArea::new(
-                //             rect.min.x as usize,
-                //             rect.min.y as usize,
-                //             rect.width() as usize,
-                //             rect.height() as usize,
-                //         ));
-                //         log::debug!(
-                //             "Capture Area: x:{}, y:{}, width:{}, height:{}",
-                //             self.capture_area.unwrap().x,
-                //             self.capture_area.unwrap().y,
-                //             self.capture_area.unwrap().width,
-                //             self.capture_area.unwrap().height
-                //         );
-                //         self.is_selecting = false;
-                //         self.drag_start = None;
-                //         self.new_capture_area = None;
-                //     }
-                //     // Cancel selection
-                //     if ui.button("Cancel").clicked() {
-                //         self.is_selecting = false;
-                //         self.new_capture_area = None;
-                //         self.drag_start = None;
-                //     }
-                // }
+                            if output.status.success() {
+                                // Parse the standard output
+                                let stdout = std::str::from_utf8(&output.stdout).unwrap();
+                                println!("Main process received: {}", stdout);
+                                
+                                // Parse JSON response
+                                let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap();
+                                
+                                match json_response["status"].as_str() {
+                                    Some("success") => {
+                                        // Parse capture area data on success
+                                        if let Some(data) = json_response.get("data") {
+                                            let capture_area: CaptureArea = serde_json::from_value(data.clone()).unwrap();
+                                            self.capture_area = Some(capture_area);
+                                        }
+                                    },
+                                    Some("cancelled") => {
+                                        println!("User cancelled the capture operation");
+                                        //self.capture_area = None;
+                                    },
+                                    _ => {
+                                        eprintln!("Unknown status in response");
+                                        self.capture_area = None;
+                                    }
+                                }
+                            } else {
+                                // Handle errors from the secondary process
+                                let stderr = std::str::from_utf8(&output.stderr).unwrap();
+                                eprintln!("Secondary process error: {}", stderr);
+                                self.capture_area = None;
+                            }
+                        
+                            
+                      
+                      
+                        
+                    self.is_selecting = false;
+ 
+                    /*egui::Window::new("Select Capture Area")
+                        .collapsible(false)
+                        .resizable(false)
+                        .default_size(ctx.screen_rect().size())
+                        .show(ctx, |ui| {
+                            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
 
+                            if response.drag_started() {
+                                self.drag_start = Some(response.interact_pointer_pos().unwrap());
+                            }
+
+                            if let Some(start) = self.drag_start {
+                                if let Some(current) = response.interact_pointer_pos() {
+                                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
+                                    if let Some(rect) = self.new_capture_area {
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            0.0,
+                                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
+                                        );
+                                        ui.painter().rect_stroke(
+                                            rect,
+                                            0.0,
+                                            egui::Stroke::new(2.0, egui::Color32::GREEN),
+                                        );
+                                    }
+                                }
+                            }
+
+                            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
+                                let rect = self.new_capture_area.unwrap();
+                                self.capture_area = Some(CaptureArea::new(
+                                    rect.min.x as usize,
+                                    rect.min.y as usize,
+                                    rect.width() as usize,
+                                    rect.height() as usize,
+                                ));
+                                log::debug!(
+                                    "Capture Area: x:{}, y:{}, width:{}, height:{}",
+                                    self.capture_area.unwrap().x,
+                                    self.capture_area.unwrap().y,
+                                    self.capture_area.unwrap().width,
+                                    self.capture_area.unwrap().height
+                                );
+                                self.is_selecting = false;
+                                self.drag_start = None;
+                                self.new_capture_area = None;
+                            }
+
+                            if ui.button("Cancel").clicked() {
+                                self.is_selecting = false;
+                                self.new_capture_area = None;
+                                self.drag_start = None;
+                            } 
+                        }); */
+                    // TODO: Select capture area
+                    // display a rectangle to show the selected area
+
+                      
+                }
+
+
+                if self.capture_area.is_some() {
+                    if ui.button("Reset Capture Area").clicked() {
+                        self.capture_area = None;
+                    }
+                }
+
+            });
                 // Update capture area in config when it changes
                 if let Some(area) = self.capture_area {
                     let mut config = self.config.lock().unwrap();
@@ -568,6 +704,7 @@ impl RustreamApp {
 
                 if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
                     self.show_config = true;
+                    
                 }
                 self.render_recording_controls(ui);
 
@@ -822,5 +959,163 @@ impl eframe::App for RustreamApp {
 
         self.triggered_actions.clear();
         ctx.request_repaint();
+    }
+}
+
+pub struct SecondaryApp {
+    rustream_app: Arc<Mutex<RustreamApp>>,
+}
+
+impl SecondaryApp {
+    pub fn new(rustream_app: Arc<Mutex<RustreamApp>>) -> Self {
+        Self { rustream_app }
+    }
+}
+
+impl eframe::App for SecondaryApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut app = self.rustream_app.lock().unwrap();
+        
+        // Handle Alt+F4 and window close events
+        if ctx.input(|i| i.viewport().close_requested()) {
+            println!("{{\"status\": \"cancelled\"}}\n");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(0);
+        }
+
+        // Add Esc key handling
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            println!("{{\"status\": \"cancelled\"}}\n");
+            std::io::stdout().flush().unwrap();
+            std::process::exit(0);
+        }
+        
+        let scale_factor = ctx.pixels_per_point();
+        
+        // Add tutorial window
+        egui::Window::new("Tutorial")
+            .fixed_pos([10.0, 10.0])
+            .title_bar(false)
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180)))
+            .show(ctx, |ui| {
+                ui.colored_label(
+                    egui::Color32::WHITE,
+                    "How to select an area:\n\
+                     1. Click and drag to select the desired area\n\
+                     2. Release to confirm the selection\n\
+                     3. Click OK to capture or Cancel to try again\n\
+                     Press ESC at any time to exit"
+                );
+            });
+        
+        CentralPanel::default()
+            .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
+            .show(ctx, |ui| {
+                let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+
+                // Handle drag start
+                if response.drag_started() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let screen_pos = egui::pos2(
+                            pos.x * scale_factor,
+                            pos.y * scale_factor
+                        );
+                        app.drag_start = Some(screen_pos);
+                    }
+                    app.show_popup = false;
+                }
+
+                // Handle dragging and drawing
+                if let Some(start) = app.drag_start {
+                    if let Some(current) = response.interact_pointer_pos() {
+                        let screen_pos = egui::pos2(
+                            current.x * scale_factor,
+                            current.y * scale_factor
+                        );
+                        app.new_capture_area = Some(egui::Rect::from_two_pos(start, screen_pos));
+                    }
+                }
+
+                // Draw persistent border rectangle
+                if let Some(rect) = app.new_capture_area {
+                    let display_rect = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x/scale_factor, rect.min.y/scale_factor),
+                        egui::pos2(rect.max.x/scale_factor, rect.max.y/scale_factor)
+                    );
+
+                    // Draw semi-transparent border
+                    ui.painter().rect_stroke(
+                        display_rect,
+                        0.0,
+                        egui::Stroke::new(3.0, egui::Color32::from_rgba_unmultiplied(0, 255, 0, 128)),
+                    );
+
+                    if response.drag_released() {
+                        app.show_popup = true;
+                    }
+                }
+
+                // Show centered popup
+                if app.show_popup && app.new_capture_area.is_some() {
+                    let rect = app.new_capture_area.unwrap();
+                    egui::Window::new("Confirm Selection")
+                        .fixed_size([300.0, 150.0])
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .resizable(false)
+                        .collapsible(false)
+                        .show(ctx, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(20.0);
+                                ui.heading("Do you want to confirm this selection?");
+                                ui.add_space(30.0);
+                                
+                                let total_width = 240.0;
+                                let button_width = 100.0;
+                                let spacing = (total_width - (2.0 * button_width)) / 2.0;
+                                
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(total_width, 40.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        if ui.add_sized([button_width, 40.0], egui::Button::new("OK")).clicked() {
+                                            let output = CaptureArea::new(
+                                                (rect.min.x).round() as usize,
+                                                (rect.min.y).round() as usize,
+                                                (rect.width()).round() as usize,
+                                                (rect.height()).round() as usize,
+                                            );
+
+                                            let output_with_status = json!({
+                                                "status": "success",
+                                                "data": output
+                                            });
+
+                                            println!("{}\n", serde_json::to_string(&output_with_status).unwrap());
+                                            std::io::stdout().flush().unwrap();
+                                            
+                                            app.capture_area = Some(output);
+                                            app.show_popup = false;
+                                            app.is_selecting = false;
+                                            app.drag_start = None;
+                                            app.new_capture_area = None;
+                                            std::process::exit(0);
+                                        }
+
+                                        ui.add_space(spacing);
+                                        
+                                        if ui.add_sized([button_width, 40.0], egui::Button::new("Cancel")).clicked() {
+                            
+                                            app.show_popup = false;
+                                            app.is_selecting = false;
+                                            app.drag_start = None;
+                                            app.new_capture_area = None;
+                                            
+                                        }
+                                    }
+                                );
+                            });
+                        });
+                }
+            });
     }
 }

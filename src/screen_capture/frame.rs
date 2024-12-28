@@ -38,40 +38,52 @@ impl CapturedFrame {
         buffer_height: usize,
         crop_area: CaptureArea,
     ) -> (RgbaBuffer, usize, usize) {
-        // Clamp and adjust the provided crop area
-        let crop = CaptureArea::new_with_safeguards(
-            crop_area.x,
-            crop_area.y,
-            crop_area.width,
-            crop_area.height,
-            buffer_width,
-            buffer_height,
-        );
-
-        // Calculate the stride (bytes per row) of the source buffer
-        let stride = buffer_width * 4;
-
-        // Preallocate the cropped RGBA data (buffer for the final image)
-        let mut rgba_data: RgbaBuffer = vec![0u8; crop.width * crop.height * 4];
-
-        // Process the buffer and extract the cropped region
-        for row in 0..crop.height {
-            let src_start = ((crop.y + row) * stride) + (crop.x * 4);
-            let dst_start = row * crop.width * 4;
-
-            // Iterate over each pixel in the row
-            for col in 0..crop.width {
-                let src_idx = src_start + col * 4;
-                let dst_idx = dst_start + col * 4;
-
-                // Set the RGBA values in the destination buffer
-                rgba_data[dst_idx] = buffer_bgra[src_idx + 2]; // B to R
-                rgba_data[dst_idx + 1] = buffer_bgra[src_idx + 1]; // G remains the same
-                rgba_data[dst_idx + 2] = buffer_bgra[src_idx]; // R to B
-                rgba_data[dst_idx + 3] = 255; // Alpha
+        // Debug input values
+        println!("Initial buffer: {}x{}", buffer_width, buffer_height);
+        println!("Requested crop: x={}, y={}, w={}, h={}", 
+            crop_area.x, crop_area.y, crop_area.width, crop_area.height);
+    
+        // Ensure crop coordinates are within bounds
+        let x = crop_area.x;
+        let y = crop_area.y;
+        let width = if x + crop_area.width > buffer_width {
+            buffer_width - x
+        } else {
+            crop_area.width
+        };
+        let height = if y + crop_area.height > buffer_height {
+            buffer_height - y
+        } else {
+            crop_area.height
+        };
+    
+        println!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
+    
+        // Allocate output buffer
+        let mut rgba_data = vec![0u8; width * height * 4];
+        let src_stride = buffer_width * 4;
+        let dst_stride = width * 4;
+    
+        // Copy and convert pixels
+        for row in 0..height {
+            let src_row = y + row;
+            for col in 0..width {
+                let src_col = x + col;
+                
+                let src_idx = (src_row * src_stride) + (src_col * 4);
+                let dst_idx = (row * dst_stride) + (col * 4);
+    
+                if src_idx + 3 < buffer_bgra.len() && dst_idx + 3 < rgba_data.len() {
+                    rgba_data[dst_idx] = buffer_bgra[src_idx + 2];     // R
+                    rgba_data[dst_idx + 1] = buffer_bgra[src_idx + 1]; // G
+                    rgba_data[dst_idx + 2] = buffer_bgra[src_idx];     // B
+                    rgba_data[dst_idx + 3] = buffer_bgra[src_idx + 3]; // A
+                }
             }
         }
-        (rgba_data, crop.width, crop.height)
+    
+        println!("Output buffer: {}x{}", width, height);
+        (rgba_data, width, height)
     }
 
     pub fn from_bgra_buffer(
