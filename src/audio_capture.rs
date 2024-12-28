@@ -8,8 +8,6 @@ use std::sync::{
     Arc, Mutex,
 };
 
-type AudioCallback = Box<dyn Fn(&[f32]) + Send + Sync + 'static>;
-
 // pub struct AudioStream {
 //     buffer: RingBuffer<f32>,
 //     encoder: AudioEncoder,
@@ -17,7 +15,7 @@ type AudioCallback = Box<dyn Fn(&[f32]) + Send + Sync + 'static>;
 // }
 
 pub struct AudioCapturer {
-    config: Arc<Mutex<Config>>,
+    // config: Arc<Mutex<Config>>,
     is_capturing: Arc<AtomicBool>,
     stream: Option<Stream>,
     audio_buffer: Vec<f32>,
@@ -25,9 +23,9 @@ pub struct AudioCapturer {
 }
 
 impl AudioCapturer {
-    pub fn new(config: Arc<Mutex<Config>>) -> Self {
+    pub fn new(/*config: Arc<Mutex<Config>>*/) -> Self {
         Self {
-            config,
+            // config,
             is_capturing: Arc::new(AtomicBool::new(false)),
             stream: None,
             audio_buffer: Vec::new(),

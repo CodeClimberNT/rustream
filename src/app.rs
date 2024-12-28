@@ -13,8 +13,7 @@ use serde_json::json;
 
 use eframe::egui;
 use egui::{
-    CentralPanel, ColorImage, ComboBox, Context, Rect, RichText, TextureHandle, TopBottomPanel, Ui,
-    Window,
+    CentralPanel, Color32, ColorImage, ComboBox, Context, Pos2, Rect, RichText, TextureHandle, TopBottomPanel, Ui, Window
 };
 
 use std::env;
@@ -27,17 +26,10 @@ lazy_static! {
 }
 
 
-use std::process::Command;
-use std::env;
-use std::io::Write;
-
-
 pub struct RustreamApp {
-    config: Arc<Mutex<Config>>,
+    pub config: Arc<Mutex<Config>>,
     frame_grabber: ScreenCapture,
     audio_capturer: AudioCapturer,
-    pub config: Arc<Mutex<Config>>,
-    frame_grabber: FrameGrabber,
     video_recorder: VideoRecorder,
     page: PageView,                              // Enum to track modes
     display_texture: Option<TextureHandle>,      // Texture for the screen capture
@@ -47,61 +39,12 @@ pub struct RustreamApp {
     preview_active: bool,
     is_selecting: bool,
     capture_area: Option<CaptureArea>,
-
     show_config: bool,
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
     triggered_actions: Vec<HotkeyAction>,
-    secondary_window_open: bool,
-    show_popup: bool,
 }
 
-#[derive(Default)]
-struct SelectionWindow {
-    drag_start: Option<egui::Pos2>,
-    new_capture_area: Option<egui::Rect>,
-}
-
-impl eframe::App for SelectionWindow {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Drag to select the capture area:");
-
-            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
-
-            if response.drag_started() {
-                self.drag_start = Some(response.interact_pointer_pos().unwrap());
-            }
-
-            if let Some(start) = self.drag_start {
-                if let Some(current) = response.interact_pointer_pos() {
-                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
-                    if let Some(rect) = self.new_capture_area {
-                        ui.painter().rect_filled(
-                            rect,
-                            0.0,
-                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                        );
-                        ui.painter().rect_stroke(
-                            rect,
-                            0.0,
-                            egui::Stroke::new(2.0, egui::Color32::GREEN),
-                        );
-                    }
-                }
-            }
-
-            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
-                println!("Capture Area Selected: {:?}", self.new_capture_area);
-                // Logica per salvare o restituire l'area selezionata
-            }
-
-            if ui.button("Cancel").clicked() {
-                // Logica per annullare la selezione
-            }
-        });
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextureId {
@@ -176,9 +119,8 @@ impl RustreamApp {
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
 
-        // Create audio callback that records internally
         let audio_capturer = AudioCapturer::new(
-            config.clone()
+            // config.clone()
         );
 
         RustreamApp {
@@ -194,9 +136,7 @@ impl RustreamApp {
             address_text: String::new(),
             preview_active: false,
             is_selecting: false,
-            // drag_start: None,
             capture_area: None,
-            // new_capture_area: None,
             show_config: false,
             editing_hotkey: None,
             triggered_actions: Vec::new(),
@@ -408,23 +348,11 @@ impl RustreamApp {
                         self.is_selecting = false;
                     }
 
-                            if ui.button("Cancel").clicked() {
-                                self.is_selecting = false;
-                                self.new_capture_area = None;
-                                self.drag_start = None;
-                            } 
-                        }); */
-                    // TODO: Select capture area
-                    // display a rectangle to show the selected area
-
-                      
-                }
-
-                if self.capture_area.is_some() {
-                    if ui.button("Reset Capture Area").clicked() {
+                    if self.capture_area.is_some() && ui.button("Reset Capture Area").clicked() {
                         self.capture_area = None;
                     }
-                }
+                });
+
                 // Update capture area in config when it changes
                 if let Some(area) = self.capture_area {
                     let mut config = self.config.lock().unwrap();

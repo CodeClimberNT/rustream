@@ -1,12 +1,13 @@
 // https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+
 use std::env;
 mod app;
 mod audio_capture;
 mod common;
 mod config;
-mod screen_capture;
 mod hotkey;
+mod screen_capture;
 mod video_recorder;
 
 use app::{RustreamApp, SecondaryApp};
@@ -50,8 +51,8 @@ fn main() {
         //persist_window: true,
         viewport: ViewportBuilder {
             transparent: Some(true),
-            fullscreen: Some(false),
-            maximized: Some(true),
+            fullscreen: Some(true),
+            maximized: Some(false),
             //min_inner_size: Some(Vec2::new(1920.0, 1080.0)), // Set the desired full screen size
             decorations: Some(false),
             title: Some(APP_TITLE.to_string()),
