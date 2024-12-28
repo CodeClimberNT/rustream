@@ -37,57 +37,8 @@ pub struct RustreamApp {
     preview_active: bool,
     is_selecting: bool,
     capture_area: Option<CaptureArea>,
-    drag_start: Option<Pos2>,
-    new_capture_area: Option<Rect>,
+
     show_config: bool,
-    show_popup: bool,
-}
-
-#[derive(Default)]
-struct SelectionWindow {
-    drag_start: Option<egui::Pos2>,
-    new_capture_area: Option<egui::Rect>,
-}
-
-impl eframe::App for SelectionWindow {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Drag to select the capture area:");
-
-            let response = ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
-
-            if response.drag_started() {
-                self.drag_start = Some(response.interact_pointer_pos().unwrap());
-            }
-
-            if let Some(start) = self.drag_start {
-                if let Some(current) = response.interact_pointer_pos() {
-                    self.new_capture_area = Some(egui::Rect::from_two_pos(start, current));
-                    if let Some(rect) = self.new_capture_area {
-                        ui.painter().rect_filled(
-                            rect,
-                            0.0,
-                            egui::Color32::from_rgba_premultiplied(0, 255, 0, 100),
-                        );
-                        ui.painter().rect_stroke(
-                            rect,
-                            0.0,
-                            egui::Stroke::new(2.0, egui::Color32::GREEN),
-                        );
-                    }
-                }
-            }
-
-            if self.new_capture_area.is_some() && ui.button("OK").clicked() {
-                println!("Capture Area Selected: {:?}", self.new_capture_area);
-                // Logica per salvare o restituire l'area selezionata
-            }
-
-            if ui.button("Cancel").clicked() {
-                // Logica per annullare la selezione
-            }
-        });
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
