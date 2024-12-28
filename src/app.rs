@@ -1,3 +1,4 @@
+use crate::audio_capture::AudioCapturer;
 use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
@@ -13,10 +14,10 @@ use egui::{
     Window,
 };
 
-#[derive(Default)]
 pub struct RustreamApp {
     config: Arc<Mutex<Config>>,
     frame_grabber: ScreenCapture,
+    audio_capturer: AudioCapturer,
     video_recorder: VideoRecorder,
     page: PageView,                              // Enum to track modes
     display_texture: Option<TextureHandle>,      // Texture for the screen capture
@@ -105,15 +106,32 @@ impl RustreamApp {
 
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
-        let video_recorder: VideoRecorder = VideoRecorder::new(config.clone());
+        let video_recorder = VideoRecorder::new(config.clone());
+
+        // Create audio callback that records internally
+        let audio_capturer = AudioCapturer::new(
+            config.clone()
+        );
 
         RustreamApp {
             config,
             frame_grabber,
             video_recorder,
+            audio_capturer,
             textures,
             hotkey_manager: HotkeyManager::new(),
-            ..Default::default()
+            page: PageView::HomePage,
+            display_texture: None,
+            cropped_frame: None,
+            address_text: String::new(),
+            preview_active: false,
+            is_selecting: false,
+            // drag_start: None,
+            capture_area: None,
+            // new_capture_area: None,
+            show_config: false,
+            editing_hotkey: None,
+            triggered_actions: Vec::new(),
         }
     }
 
@@ -525,9 +543,9 @@ impl RustreamApp {
             HotkeyAction::StartRecording,
         ) {
             if recording {
-                self.video_recorder.stop();
+                self.stop_recording();
             } else {
-                self.video_recorder.start();
+                self.start_recording();
             }
         }
     }
@@ -627,6 +645,35 @@ impl RustreamApp {
             .on_disabled_hover_text("NOT IMPLEMENTED")
             .on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
+
+    fn start_recording(&mut self) {
+        // Start audio capture first
+        if let Err(e) = self.audio_capturer.start() {
+            log::error!("Failed to start audio capture: {}", e);
+            return;
+        }
+
+        // Then start video recording
+        self.video_recorder.start();
+    }
+
+    fn stop_recording(&mut self) {
+        // Stop audio capture first and get the buffer
+        self.audio_capturer.stop();
+        let audio_buffer = self.audio_capturer.take_audio_buffer();
+
+        // Pass audio buffer to video recorder before stopping
+        if !audio_buffer.is_empty() {
+            if let Err(e) = self.video_recorder.process_audio(audio_buffer) {
+                log::error!("Failed to process audio: {}", e);
+            }
+        }
+
+        // Finally stop video recording
+        self.video_recorder.stop();
+    }
+
+
 
     fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {
         // Check if Alt is pressed for underline

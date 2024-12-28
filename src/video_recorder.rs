@@ -12,7 +12,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use hound::{WavSpec, WavWriter};
+use hound::{WavReader, WavSpec, WavWriter};
 use image::RgbaImage;
 
 pub struct VideoRecorder {
@@ -20,10 +20,11 @@ pub struct VideoRecorder {
     is_recording: Arc<AtomicBool>,
     is_finalizing: Arc<AtomicBool>,
     frame_counter: u32,
-    audio_buffer: Vec<f32>,
     audio_file: Option<PathBuf>,
     frame_writer_handle: Option<JoinHandle<()>>,
     start_time: Option<Instant>,
+    last_frame_time: Option<Instant>,
+    target_frame_duration: Duration,
     frame_sender: Option<mpsc::Sender<(Arc<RgbaImage>, PathBuf)>>,
 }
 
@@ -38,21 +39,23 @@ impl VideoRecorder {
         let temp_dir = config.lock().unwrap().video.temp_dir.clone();
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
 
+        let fps = config.lock().unwrap().video.fps;
+
         Self {
             config,
             is_recording: Arc::new(AtomicBool::new(false)),
             is_finalizing: Arc::new(AtomicBool::new(false)),
             frame_writer_handle: None,
             frame_counter: 0,
-            audio_buffer: Vec::new(),
             audio_file: None,
             frame_sender: None,
             start_time: None,
+            last_frame_time: None,
+            target_frame_duration: Duration::from_secs_f64(1.0 / fps as f64),
         }
     }
 
     fn cleanup(&mut self) {
-        self.audio_buffer.clear();
         self.audio_file = None;
         self.frame_counter = 0;
         self.start_time = Some(Instant::now());
@@ -64,36 +67,60 @@ impl VideoRecorder {
             return;
         }
 
-        let temp_dir: PathBuf = self.config.lock().unwrap().video.temp_dir.clone();
+        // Create temp directory if it doesn't exist
+        let temp_dir = {
+            let config = self.config.lock().unwrap();
+            let temp_dir = config.video.temp_dir.clone();
+            if !temp_dir.exists() {
+                if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+                    log::error!("Failed to create temp directory: {}", e);
+                    return;
+                }
+            }
+            temp_dir
+        };
 
-        // Clear any existing frames
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).expect("Failed to clean temp directory");
-        }
-        std::fs::create_dir_all(&temp_dir).expect("Failed to create temp directory");
+        // Setup frame writer thread
+        let (sender, receiver) = mpsc::channel();
+        self.frame_sender = Some(sender);
 
-        // Create channel for frame writing
-        let (tx, rx) = mpsc::channel::<(Arc<RgbaImage>, PathBuf)>();
-        self.frame_sender = Some(tx);
-
-        // Spawn single background thread for writing frames
-        let writer_handle = thread::spawn(move || {
-            while let Ok((image, path)) = rx.recv() {
-                if let Err(e) = image.save(&path) {
-                    log::error!("Failed to save frame: {}", e);
+        let handle = thread::spawn(move || {
+            while let Ok((image_data, frame_path)) = receiver.recv() {
+                match image_data.save(&frame_path) {
+                    Ok(_) => (),
+                    Err(e) => log::error!("Failed to save frame: {}", e),
                 }
             }
         });
-
+        self.frame_writer_handle = Some(handle);
         self.cleanup();
-        self.frame_writer_handle = Some(writer_handle);
         self.is_recording.store(true, Ordering::SeqCst);
-        log::info!("Recording started");
+        log::info!("Started recording to {:?}", temp_dir);
     }
 
     pub fn record_frame(&mut self, frame: &CapturedFrame) {
         if !self.is_recording.load(Ordering::SeqCst) {
             return;
+        }
+
+        let now = Instant::now();
+
+        // Initialize start time if this is the first frame
+        if self.start_time.is_none() {
+            self.start_time = Some(now);
+            self.last_frame_time = Some(now);
+        }
+
+        // Check if enough time has passed since last frame
+        if let Some(last_time) = self.last_frame_time {
+            let elapsed = now.duration_since(last_time);
+            if elapsed < self.target_frame_duration {
+                return; // Skip frame if too soon
+            }
+            // Update last frame time based on target duration multiples
+            let frames_to_skip =
+                (elapsed.as_secs_f64() / self.target_frame_duration.as_secs_f64()).floor() as u32;
+            self.last_frame_time = Some(last_time + self.target_frame_duration * frames_to_skip);
         }
 
         let temp_dir: PathBuf = self.config.lock().unwrap().video.temp_dir.clone();
@@ -107,18 +134,12 @@ impl VideoRecorder {
             }
         }
     }
-
-    pub fn record_audio(&mut self, audio_data: &[f32]) {
-        if !self.is_recording.load(Ordering::SeqCst) {
-            return;
-        }
-        self.audio_buffer.extend_from_slice(audio_data);
-    }
-
     pub fn stop(&mut self) -> bool {
         if !self.is_recording.load(Ordering::SeqCst) {
             return false;
         }
+
+        let start_time = self.start_time;
 
         self.is_recording.store(false, Ordering::SeqCst);
         self.is_finalizing.store(true, Ordering::SeqCst);
@@ -126,35 +147,34 @@ impl VideoRecorder {
         self.frame_sender.take();
         log::info!("Recording stopped, waiting for pending frames...");
 
-        let elapsed_time: Duration = self.start_time.unwrap_or_else(Instant::now).elapsed();
-        let total_seconds: f64 = elapsed_time.as_secs_f64();
-        let actual_fps: u32 = if total_seconds > 0.0 {
-            (self.frame_counter as f64 / total_seconds).round() as u32
-        } else {
-            self.config.lock().unwrap().video.fps
-        };
-
-        log::info!(
-            "Recording stopped. Duration: {:.2} seconds, Frames: {}, Calculated FPS: {}",
-            total_seconds,
-            self.frame_counter,
-            actual_fps
-        );
-
+        // Get necessary data before spawning thread
         let writer_handle = self.frame_writer_handle.take();
         let config = self.config.clone();
         let is_finalizing = self.is_finalizing.clone();
         let audio_file = self.audio_file.clone();
+        let frame_counter = self.frame_counter;
 
         std::thread::spawn(move || {
             // Wait for frame writer to finish
             if let Some(handle) = writer_handle {
                 let _ = handle.join();
             }
-            let config = config.lock().unwrap().video.clone();
 
-            VideoRecorder::run_ffmpeg_command(&config, audio_file, &actual_fps);
-            std::fs::remove_dir_all(&config.temp_dir).expect("Failed to clean temp directory");
+            let config_guard = config.lock().unwrap();
+            let video_config = config_guard.video.clone();
+            drop(config_guard); // Release lock early
+
+            let fps = Self::calculate_fps(frame_counter, &video_config, &audio_file, start_time);
+            log::info!(
+                "Recording metrics - Frames: {}, Duration: {:.2}s, Calculated FPS: {}",
+                frame_counter,
+                start_time.map_or(0.0, |t| t.elapsed().as_secs_f64()),
+                fps
+            );
+
+            VideoRecorder::run_ffmpeg_command(&video_config, audio_file, &fps);
+            std::fs::remove_dir_all(&video_config.temp_dir)
+                .expect("Failed to clean temp directory");
             is_finalizing.store(false, Ordering::SeqCst);
         });
 
@@ -163,8 +183,13 @@ impl VideoRecorder {
 
     fn run_ffmpeg_command(config: &VideoConfig, audio_file: Option<PathBuf>, fps: &u32) {
         log::info!("Generating video...");
+
         let mut command = Command::new("ffmpeg");
-        log::info!("Temp dir: {:?}", config.temp_dir);
+
+        // Add verbose logging
+        command.arg("-v").arg("debug");
+
+        // Input frames
         command
             .arg("-y")
             .arg("-hwaccel")
@@ -172,47 +197,70 @@ impl VideoRecorder {
             .arg("-framerate")
             .arg(fps.to_string())
             .arg("-i")
-            .arg(config.temp_dir.join("frame_%06d.png"))
-            .arg("-vf")
-            .arg(format!("fps={}", fps))
-            .arg("-c:v") // Video encoder
-            .arg("libx264") // Try NVIDIA encoder first
-            .arg("-movflags")
-            .arg("+faststart") // Enable fast start
+            .arg(config.temp_dir.join("frame_%06d.png"));
+
+        // Add audio input BEFORE video encoding params
+        if let Some(audio_path) = &audio_file {
+            if audio_path.exists() {
+                log::info!("Adding audio from: {:?}", audio_path);
+                command
+                    .arg("-i")
+                    .arg(audio_path)
+                    // Map audio stream
+                    .arg("-map")
+                    .arg("0:v") // First input video
+                    .arg("-map")
+                    .arg("1:a"); // Second input audio
+            } else {
+                log::warn!("Audio file not found at: {:?}", audio_path);
+            }
+        }
+
+        // Video encoding parameters
+        command
+            .arg("-c:v")
+            .arg("libx264")
             .arg("-pix_fmt")
             .arg("yuv420p")
             .arg("-preset")
-            .arg("medium") // Encoding speed
-            .arg("-tune")
-            .arg("zerolatency")
+            .arg("medium")
             .arg("-crf")
-            .arg("23");
+            .arg("23")
+            .arg("-r")
+            .arg(fps.to_string()) // Force output FPS
+            .arg("-movflags")
+            .arg("+faststart");
 
-        // Add audio if available
-        if let Some(audio_file) = &audio_file {
-            log::debug!("Audio was Available for the video");
+        // Audio encoding parameters (when audio present)
+        if audio_file.is_some() {
             command
-                .arg("-i")
-                .arg(audio_file)
-                .arg("-ac") // Number of audio channels
-                .arg("1")
-                .arg("-acodec")
+                .arg("-c:a") // Changed from -acodec
                 .arg("aac")
                 .arg("-b:a")
-                .arg("192k");
-        } else {
-            log::warn!("Audio was not available for the video");
+                .arg("192k")
+                .arg("-ac")
+                .arg("1");
         }
 
         // Set output path
         command.arg(&config.output_path);
+        log::debug!("FFmpeg command: {:?}", command);
 
         match command.output() {
-            Ok(_) => log::info!(
-                "Video generated successfully: {}",
-                &config.output_path.to_string_lossy()
-            ),
+            Ok(output) => {
+                // Log FFmpeg output for debugging
+                log::debug!("FFmpeg stdout: {}", String::from_utf8_lossy(&output.stdout));
+                log::debug!("FFmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
 
+                if output.status.success() {
+                    log::info!(
+                        "Video generated successfully: {}",
+                        &config.output_path.to_string_lossy()
+                    );
+                } else {
+                    log::error!("FFmpeg failed with status: {}", output.status);
+                }
+            }
             Err(e) => log::error!("FFmpeg execution failed: {}", e),
         }
     }
@@ -221,7 +269,18 @@ impl VideoRecorder {
         self.is_finalizing.load(Ordering::SeqCst)
     }
 
-    fn save_audio_to_wav(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_audio(
+        &mut self,
+        audio_data: Vec<f32>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if audio_data.is_empty() {
+            return Ok(());
+        }
+
+        let temp_dir = self.config.lock().unwrap().video.temp_dir.clone();
+        let audio_path = temp_dir.join("audio.wav");
+        log::info!("Audio path: {:?}", audio_path);
+
         let spec = WavSpec {
             channels: 1,
             sample_rate: 48000,
@@ -229,16 +288,65 @@ impl VideoRecorder {
             sample_format: hound::SampleFormat::Float,
         };
 
-        let mut writer = WavWriter::create(path, spec)?;
-        for sample in &self.audio_buffer {
-            writer.write_sample(*sample)?;
+        let mut writer = WavWriter::create(&audio_path, spec)?;
+
+        for sample in audio_data {
+            writer.write_sample(sample)?;
         }
         writer.finalize()?;
+
+        self.audio_file = Some(audio_path);
+        log::info!("Audio saved succesfully");
         Ok(())
     }
 
     pub fn is_recording(&self) -> bool {
         self.is_recording.load(Ordering::SeqCst)
+    }
+
+    fn calculate_fps(
+        frame_counter: u32,
+        config: &VideoConfig,
+        audio_file: &Option<PathBuf>,
+        start_time: Option<Instant>,
+    ) -> u32 {
+        // Get actual recording duration
+        let duration_secs = if let Some(start) = start_time {
+            start.elapsed().as_secs_f64()
+        } else {
+            log::warn!("No start time available, using config fps");
+            return config.fps;
+        };
+
+        return config.fps;
+
+        // Calculate actual FPS based on frame count and duration
+        let actual_fps = if duration_secs > 0.1 {
+            let calculated_fps = (frame_counter as f64 / duration_secs).round() as u32;
+            log::info!(
+                "FPS calculation: {} frames / {:.2}s = {} fps (config: {} fps)",
+                frame_counter,
+                duration_secs,
+                calculated_fps,
+                config.fps
+            );
+            calculated_fps
+        } else {
+            log::warn!("Duration too short, using config fps");
+            config.fps
+        };
+
+        // Validate against config
+        if (actual_fps as i32 - config.fps as i32).abs() > 5 {
+            log::warn!(
+                "Large FPS deviation - Actual: {}, Config: {}",
+                actual_fps,
+                config.fps
+            );
+        }
+
+        // Use actual FPS for consistent playback
+        actual_fps
     }
 }
 
