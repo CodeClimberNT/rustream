@@ -1,5 +1,5 @@
 // https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
-// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 use std::env;
 mod app;
 // mod audio_capture;
@@ -9,16 +9,11 @@ mod frame_grabber;
 mod video_recorder;
 
 use app::{RustreamApp, SecondaryApp};
-use egui::debug_text::print;
 use egui::{ViewportBuilder, X11WindowType};
 use env_logger::Env;
 use log::LevelFilter;
-use eframe::egui::Pos2;
 
-use std::sync::{Arc, Mutex};
-use eframe::egui::Vec2;
 use eframe::NativeOptions;
-
 
 const APP_TITLE: &str = "RUSTREAM";
 
@@ -33,7 +28,7 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
     let is_secondary = args.iter().any(|arg| arg == "--secondary");
-    let rustream_app = Arc::new(Mutex::new(RustreamApp::default()));
+
     // make the options easier to change
     let options: eframe::NativeOptions = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -62,7 +57,7 @@ fn main() {
             window_type: Option::from(X11WindowType::Toolbar),
             ..Default::default()
         },
-        
+
         ..Default::default()
     };
 
@@ -71,17 +66,15 @@ fn main() {
         eframe::run_native(
             "Resize Me",
             options2,
-            Box::new(|_cc| Ok(Box::new(SecondaryApp::new(rustream_app.clone())))),
+            Box::new(|_cc| Ok(Box::new(SecondaryApp::default()))),
         )
         .expect("Failed to run Resize Screen");
-        return;
-    }
-    else {
-    eframe::run_native(
-        APP_TITLE,
-        options,
-        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(RustreamApp::new(cc)))),
-    )
-    .expect("Failed to run RustreamApp");
+    } else {
+        eframe::run_native(
+            APP_TITLE,
+            options,
+            Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(RustreamApp::new(cc)))),
+        )
+        .expect("Failed to run RustreamApp");
     }
 }
