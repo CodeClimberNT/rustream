@@ -15,7 +15,7 @@ users to easily navigate through the application's features.
 3. [x] Operating mode: At startup, the user will choose whether the application should operate as a
 caster or as a receiver. In the latter case, the user should be able to specify the address of the
 caster it should connect to.
-4. [ ] Selection Options: When in casting mode, the utility should allow the user to restrict the
+4. [x] Selection Options: When in casting mode, the utility should allow the user to restrict the
 grabbed content to a custom area.
 5. [x] Hotkey Support: The utility should support customizable keyboard shortcuts for
 pausing/resuming the transmission, for blanking the screen and terminating the current session.
