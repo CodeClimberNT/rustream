@@ -279,8 +279,21 @@ impl RustreamApp {
 
                 ui.heading("Streaming Settings");
                 ui.separator();
+                
+                // Monitor selection
+                let selected_monitor = &mut config.capture.selected_monitor;
+                ComboBox::from_label("Monitor")
+                    .selected_text(format!("Monitor {}", selected_monitor))
+                    .show_ui(ui, |ui| {
+                        self.frame_grabber
+                            .get_monitors()
+                            .iter()
+                            .enumerate()
+                            .for_each(|(i, m)| {
+                                ui.selectable_value(selected_monitor, i, m);
+                            });
+                    });
 
-                // TODO: Select capture area
                 ui.horizontal(|ui| {
                     self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
@@ -469,20 +482,6 @@ impl RustreamApp {
 
                 ui.heading("Recording Settings");
                 ui.separator();
-
-                // Monitor selection
-                let selected_monitor = &mut config.capture.selected_monitor;
-                ComboBox::from_label("Monitor")
-                    .selected_text(format!("Monitor {}", selected_monitor))
-                    .show_ui(ui, |ui| {
-                        self.frame_grabber
-                            .get_monitors()
-                            .iter()
-                            .enumerate()
-                            .for_each(|(i, m)| {
-                                ui.selectable_value(selected_monitor, i, m);
-                            });
-                    });
 
                 // Output path configuration
                 ui.horizontal(|ui| {
