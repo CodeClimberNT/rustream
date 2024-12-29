@@ -120,7 +120,7 @@ impl RustreamApp {
         let video_recorder = VideoRecorder::new(config.clone());
 
         let audio_capturer = AudioCapturer::new(
-            // config.clone()
+            config.clone()
         );
 
         RustreamApp {
@@ -302,7 +302,7 @@ impl RustreamApp {
                                     log::error!("Failed to read stdout: {}", e);
                                     ""
                                 });
-                                println!("Main process received: {}", stdout);
+                                log::debug!("Main process received: {}", stdout);
                             
                                 // Parse JSON with detailed error handling
                                 let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap_or_else(|e| {
@@ -686,7 +686,9 @@ impl RustreamApp {
 
         // Pass audio buffer to video recorder before stopping
         if !audio_buffer.is_empty() {
-            if let Err(e) = self.video_recorder.process_audio(audio_buffer) {
+            if let Err(e) = 
+                self.video_recorder.process_audio(audio_buffer, self.audio_capturer.device_config.as_ref().unwrap()
+            ) {
                 log::error!("Failed to process audio: {}", e);
             }
         }

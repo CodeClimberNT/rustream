@@ -12,7 +12,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use hound::{WavReader, WavSpec, WavWriter};
+use hound::{WavSpec, WavWriter};
 use image::RgbaImage;
 
 pub struct VideoRecorder {
@@ -187,13 +187,15 @@ impl VideoRecorder {
         let mut command = Command::new("ffmpeg");
 
         // Add verbose logging
-        command.arg("-v").arg("debug");
+        command.arg("-v").arg("debug").arg("-stats");
 
         // Input frames
         command
             .arg("-y")
             .arg("-hwaccel")
             .arg("auto")
+            .arg("-f")
+            .arg("image2")
             .arg("-framerate")
             .arg(fps.to_string())
             .arg("-i")
@@ -218,6 +220,8 @@ impl VideoRecorder {
 
         // Video encoding parameters
         command
+            .arg("-vf")
+            .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2") // Ensure even dimensions
             .arg("-c:v")
             .arg("libx264")
             .arg("-pix_fmt")
@@ -272,6 +276,7 @@ impl VideoRecorder {
     pub fn process_audio(
         &mut self,
         audio_data: Vec<f32>,
+        device_config: &cpal::StreamConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if audio_data.is_empty() {
             return Ok(());
@@ -282,8 +287,8 @@ impl VideoRecorder {
         log::info!("Audio path: {:?}", audio_path);
 
         let spec = WavSpec {
-            channels: 1,
-            sample_rate: 48000,
+            channels: device_config.channels,
+            sample_rate: device_config.sample_rate.0,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         };
@@ -310,6 +315,8 @@ impl VideoRecorder {
         audio_file: &Option<PathBuf>,
         start_time: Option<Instant>,
     ) -> u32 {
+        return config.fps;
+
         // Get actual recording duration
         let duration_secs = if let Some(start) = start_time {
             start.elapsed().as_secs_f64()
@@ -317,8 +324,6 @@ impl VideoRecorder {
             log::warn!("No start time available, using config fps");
             return config.fps;
         };
-
-        return config.fps;
 
         // Calculate actual FPS based on frame count and duration
         let actual_fps = if duration_secs > 0.1 {
