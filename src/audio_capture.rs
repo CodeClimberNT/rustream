@@ -20,7 +20,6 @@ pub struct AudioCapturer {
     stream: Option<Stream>,
     audio_buffer: Vec<f32>,
     thread_buffer: Arc<Mutex<Vec<f32>>>,
-    pub device_config: Option<StreamConfig>,
 }
 
 impl AudioCapturer {
@@ -31,7 +30,6 @@ impl AudioCapturer {
             stream: None,
             audio_buffer: Vec::new(),
             thread_buffer: Arc::new(Mutex::new(Vec::new())),
-            device_config: None,
         }
     }
 
@@ -53,8 +51,16 @@ impl AudioCapturer {
         let device = host.default_input_device().ok_or("No input device found")?;
 
         // Get supported config
-        let supported_config: cpal::SupportedStreamConfig = device.default_input_config().map_err(|e| e.to_string())?;
-        self.device_config = Some(supported_config.into());
+        let supported_config: cpal::SupportedStreamConfig =
+            device.default_input_config().map_err(|e| e.to_string())?;
+
+        let stream_config: StreamConfig = supported_config.into();
+
+        {
+            let audio = &mut self.config.lock().unwrap().audio;
+            audio.sample_rate = stream_config.sample_rate.0;
+            audio.channels = stream_config.channels;
+        }
 
         let is_capturing = self.is_capturing.clone();
 
@@ -62,7 +68,7 @@ impl AudioCapturer {
 
         let stream = device
             .build_input_stream(
-                self.device_config.as_ref().unwrap(),
+                &stream_config,
                 move |data: &[f32], _: &_| {
                     if is_capturing.load(Ordering::SeqCst) {
                         if let Ok(mut buffer) = buffer_clone.lock() {

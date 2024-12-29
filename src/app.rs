@@ -494,8 +494,8 @@ impl RustreamApp {
                     if ui.button("📂").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_title("Save recording as...")
-                            .set_file_name("recording.mp4")
-                            .add_filter("MP4 video", &["mp4"])
+                            .set_file_name("output.mkv")
+                            .add_filter("Matroska Video", &["mkv"])
                             .save_file()
                         {
                             config.video.output_path = path;
@@ -570,6 +570,7 @@ impl RustreamApp {
                 self.start_recording();
             }
         }
+        
     }
     fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         ui.heading("Monitor Feedback");
@@ -592,15 +593,6 @@ impl RustreamApp {
                     self.show_config = true;
                 }
                 self.render_recording_controls(ui);
-
-                let output_path = self.config.lock().unwrap().video.output_path.clone();
-                let dir_name = output_path
-                    .parent()
-                    .map(|p| p.to_string_lossy())
-                    .unwrap_or_default();
-
-                ui.add(egui::Label::new("📂 ".to_string() + &dir_name))
-                    .on_hover_text(output_path.to_string_lossy());
             });
         });
 
@@ -687,7 +679,7 @@ impl RustreamApp {
         // Pass audio buffer to video recorder before stopping
         if !audio_buffer.is_empty() {
             if let Err(e) = 
-                self.video_recorder.process_audio(audio_buffer, self.audio_capturer.device_config.as_ref().unwrap()
+                self.video_recorder.process_audio(audio_buffer
             ) {
                 log::error!("Failed to process audio: {}", e);
             }

@@ -52,7 +52,6 @@
     lazy_static = { version = "1.5.0", default-features = false }
 
 
-    # Networking (?)
     rfd = { version = "0.15.1", features = [
         "xdg-portal",
     ], default-features = false }

@@ -1,4 +1,4 @@
-use crate::config::{Config, VideoConfig};
+use crate::config::{AudioConfig, Config, VideoConfig};
 use crate::screen_capture::CapturedFrame;
 
 use std::time::{Duration, Instant};
@@ -20,6 +20,8 @@ pub struct VideoRecorder {
     is_recording: Arc<AtomicBool>,
     is_finalizing: Arc<AtomicBool>,
     frame_counter: u32,
+    recording_start_time: Option<Instant>,
+    audio_start_time: Option<Instant>,
     audio_file: Option<PathBuf>,
     frame_writer_handle: Option<JoinHandle<()>>,
     start_time: Option<Instant>,
@@ -47,6 +49,8 @@ impl VideoRecorder {
             is_finalizing: Arc::new(AtomicBool::new(false)),
             frame_writer_handle: None,
             frame_counter: 0,
+            recording_start_time: None,
+            audio_start_time: None,
             audio_file: None,
             frame_sender: None,
             start_time: None,
@@ -66,6 +70,9 @@ impl VideoRecorder {
         if self.is_recording.load(Ordering::SeqCst) {
             return;
         }
+
+        self.recording_start_time = Some(Instant::now());
+        self.audio_start_time = Some(Instant::now());
 
         // Create temp directory if it doesn't exist
         let temp_dir = {
@@ -161,7 +168,8 @@ impl VideoRecorder {
             }
 
             let config_guard = config.lock().unwrap();
-            let video_config = config_guard.video.clone();
+            let (video_config, audio_config) =
+                (config_guard.video.clone(), config_guard.audio.clone());
             drop(config_guard); // Release lock early
 
             let fps = Self::calculate_fps(frame_counter, &video_config, &audio_file, start_time);
@@ -172,7 +180,7 @@ impl VideoRecorder {
                 fps
             );
 
-            VideoRecorder::run_ffmpeg_command(&video_config, audio_file, &fps);
+            VideoRecorder::run_ffmpeg_command(&video_config, &audio_config, audio_file, &fps);
             std::fs::remove_dir_all(&video_config.temp_dir)
                 .expect("Failed to clean temp directory");
             is_finalizing.store(false, Ordering::SeqCst);
@@ -181,7 +189,13 @@ impl VideoRecorder {
         true
     }
 
-    fn run_ffmpeg_command(config: &VideoConfig, audio_file: Option<PathBuf>, fps: &u32) {
+    fn run_ffmpeg_command(
+        video_config: &VideoConfig,
+        audio_config: &AudioConfig,
+        audio_file: Option<PathBuf>,
+        fps: &u32,
+    ) {
+        let output_path = Self::generate_unique_path(video_config.output_path.clone());
         log::info!("Generating video...");
 
         let mut command = Command::new("ffmpeg");
@@ -199,7 +213,7 @@ impl VideoRecorder {
             .arg("-framerate")
             .arg(fps.to_string())
             .arg("-i")
-            .arg(config.temp_dir.join("frame_%06d.png"));
+            .arg(video_config.temp_dir.join("frame_%06d.png"));
 
         // Add audio input BEFORE video encoding params
         if let Some(audio_path) = &audio_file {
@@ -208,11 +222,16 @@ impl VideoRecorder {
                 command
                     .arg("-i")
                     .arg(audio_path)
-                    // Map audio stream
                     .arg("-map")
                     .arg("0:v") // First input video
                     .arg("-map")
-                    .arg("1:a"); // Second input audio
+                    .arg("1:a") // Second input audio
+                    .arg("-async") // Force audio sync
+                    .arg("1")
+                    .arg("-af")
+                    .arg("aresample=async=1000") // Ensure audio starts at 0
+                    .arg("-vsync")
+                    .arg("cfr"); // Set precise timestamps
             } else {
                 log::warn!("Audio file not found at: {:?}", audio_path);
             }
@@ -231,9 +250,9 @@ impl VideoRecorder {
             .arg("-crf")
             .arg("23")
             .arg("-r")
-            .arg(fps.to_string()) // Force output FPS
-            .arg("-movflags")
-            .arg("+faststart");
+            .arg(fps.to_string()) // Output FPS
+            .arg("-max_muxing_queue_size")
+            .arg("1024");
 
         // Audio encoding parameters (when audio present)
         if audio_file.is_some() {
@@ -243,11 +262,13 @@ impl VideoRecorder {
                 .arg("-b:a")
                 .arg("192k")
                 .arg("-ac")
-                .arg("1");
+                .arg(format!("{}", audio_config.channels))
+                .arg("-ar")
+                .arg(format!("{}", audio_config.sample_rate));
         }
 
         // Set output path
-        command.arg(&config.output_path);
+        command.arg(output_path.clone());
         log::debug!("FFmpeg command: {:?}", command);
 
         match command.output() {
@@ -259,7 +280,7 @@ impl VideoRecorder {
                 if output.status.success() {
                     log::info!(
                         "Video generated successfully: {}",
-                        &config.output_path.to_string_lossy()
+                        output_path.to_string_lossy()
                     );
                 } else {
                     log::error!("FFmpeg failed with status: {}", output.status);
@@ -276,24 +297,39 @@ impl VideoRecorder {
     pub fn process_audio(
         &mut self,
         audio_data: Vec<f32>,
-        device_config: &cpal::StreamConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if audio_data.is_empty() {
             return Ok(());
         }
 
-        let temp_dir = self.config.lock().unwrap().video.temp_dir.clone();
+        let (audio_config, temp_dir) = {
+            let config = self.config.lock().unwrap();
+            (config.audio.clone(), config.video.temp_dir.clone())
+        };
+
         let audio_path = temp_dir.join("audio.wav");
-        log::info!("Audio path: {:?}", audio_path);
+        log::debug!("Audio path: {:?}", audio_path);
 
         let spec = WavSpec {
-            channels: device_config.channels,
-            sample_rate: device_config.sample_rate.0,
+            channels: audio_config.channels,
+            sample_rate: audio_config.sample_rate,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         };
 
         let mut writer = WavWriter::create(&audio_path, spec)?;
+
+        if let (Some(video_start), Some(audio_start)) =
+            (self.recording_start_time, self.audio_start_time)
+        {
+            let offset_samples = (audio_start.duration_since(video_start).as_secs_f64()
+                * audio_config.sample_rate as f64) as usize;
+
+            // Add silence padding if audio started after video
+            for _ in 0..offset_samples {
+                writer.write_sample(0.0f32)?;
+            }
+        }
 
         for sample in audio_data {
             writer.write_sample(sample)?;
@@ -352,6 +388,35 @@ impl VideoRecorder {
 
         // Use actual FPS for consistent playback
         actual_fps
+    }
+
+    fn generate_unique_path(base_path: PathBuf) -> PathBuf {
+        let stem = base_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        let ext = base_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("mkv");
+
+        let parent = base_path.parent().unwrap_or(std::path::Path::new("."));
+
+        let mut counter = 0;
+        loop {
+            let filename = if counter == 0 {
+                format!("{}.{}", stem, ext)
+            } else {
+                format!("{}_{}.{}", stem, counter, ext)
+            };
+
+            let candidate = parent.join(filename);
+            if !candidate.exists() {
+                return candidate;
+            }
+            counter += 1;
+        }
     }
 }
 

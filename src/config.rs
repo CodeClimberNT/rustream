@@ -41,9 +41,8 @@ impl Default for VideoConfig {
         };
 
         Self {
-            output_path: base_path.join("output.mp4"),
-            // TODO: Right now the recording is of the app that runs at 60fps, when
-            // changing to
+            output_path: base_path.join("output.mkv"),
+            // TODO: change to actual networking stream fps
             fps: 60,
             temp_dir: temp_path,
         }
@@ -61,7 +60,6 @@ pub struct AudioConfig {
     pub enabled: bool,
     pub sample_rate: u32,
     pub channels: u16,
-    pub buffer_size: usize,
     pub volume: f32,
 }
 
@@ -71,7 +69,6 @@ impl Default for AudioConfig {
             enabled: true,
             sample_rate: 48000,
             channels: 1,
-            buffer_size: 1024,
             volume: 1.0,
         }
     }
