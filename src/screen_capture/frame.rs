@@ -39,50 +39,52 @@ impl CapturedFrame {
         crop_area: CaptureArea,
     ) -> (RgbaBuffer, usize, usize) {
         // Debug input values
-        println!("Initial buffer: {}x{}", buffer_width, buffer_height);
-        println!("Requested crop: x={}, y={}, w={}, h={}", 
-            crop_area.x, crop_area.y, crop_area.width, crop_area.height);
-    
-        // Ensure crop coordinates are within bounds
-        let x = crop_area.x;
-        let y = crop_area.y;
-        let width = if x + crop_area.width > buffer_width {
-            buffer_width - x
-        } else {
-            crop_area.width
-        };
-        let height = if y + crop_area.height > buffer_height {
-            buffer_height - y
-        } else {
+        log::debug!("Initial buffer: {}x{}", buffer_width, buffer_height);
+        log::debug!(
+            "Requested crop: x={}, y={}, w={}, h={}",
+            crop_area.x,
+            crop_area.y,
+            crop_area.width,
             crop_area.height
-        };
-    
-        println!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
-    
+        );
+
+        // Ensure crop coordinates are within bounds
+        let CaptureArea { x, y, width, height } = CaptureArea::new_with_safeguards(
+            crop_area.x,
+            crop_area.y,
+            crop_area.width,
+            crop_area.height,
+            buffer_width,
+            buffer_height,
+        );
+        
+
+        log::debug!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
+
         // Allocate output buffer
         let mut rgba_data = vec![0u8; width * height * 4];
         let src_stride = buffer_width * 4;
         let dst_stride = width * 4;
-    
+
         // Copy and convert pixels
         for row in 0..height {
             let src_row = y + row;
             for col in 0..width {
                 let src_col = x + col;
-                
+
                 let src_idx = (src_row * src_stride) + (src_col * 4);
                 let dst_idx = (row * dst_stride) + (col * 4);
-    
+
                 if src_idx + 3 < buffer_bgra.len() && dst_idx + 3 < rgba_data.len() {
-                    rgba_data[dst_idx] = buffer_bgra[src_idx + 2];     // R
+                    rgba_data[dst_idx] = buffer_bgra[src_idx + 2]; // R
                     rgba_data[dst_idx + 1] = buffer_bgra[src_idx + 1]; // G
-                    rgba_data[dst_idx + 2] = buffer_bgra[src_idx];     // B
+                    rgba_data[dst_idx + 2] = buffer_bgra[src_idx]; // B
                     rgba_data[dst_idx + 3] = buffer_bgra[src_idx + 3]; // A
                 }
             }
         }
-    
-        println!("Output buffer: {}x{}", width, height);
+
+        log::debug!("Output buffer: {}x{}", width, height);
         (rgba_data, width, height)
     }
 
@@ -114,4 +116,3 @@ impl CapturedFrame {
         }
     }
 }
-
