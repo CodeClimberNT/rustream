@@ -275,7 +275,6 @@ impl VideoRecorder {
             Ok(output) => {
                 // Log FFmpeg output for debugging
                 log::debug!("FFmpeg stdout: {}", String::from_utf8_lossy(&output.stdout));
-                log::debug!("FFmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
 
                 if output.status.success() {
                     log::info!(
