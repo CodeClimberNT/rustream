@@ -11,7 +11,7 @@ mod screen_capture;
 mod video_recorder;
 
 use app::{RustreamApp, SecondaryApp};
-use egui::{ViewportBuilder, X11WindowType};
+use egui::{Vec2, ViewportBuilder, X11WindowType};
 use env_logger::Env;
 use log::LevelFilter;
 
@@ -31,9 +31,6 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let is_secondary = args.iter().any(|arg| arg == "--secondary");
 
-    //TODO: min size
-    //~870x630
-
     let options: eframe::NativeOptions = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: ViewportBuilder {
@@ -41,6 +38,7 @@ fn main() {
             fullscreen: Some(false),
             title: Some(APP_TITLE.to_string()),
             window_type: Option::from(X11WindowType::Toolbar),
+            min_inner_size: Some(Vec2::new(870.0, 585.0)), 
             ..Default::default()
         },
         ..Default::default()
@@ -53,11 +51,9 @@ fn main() {
             transparent: Some(true),
             fullscreen: Some(true),
             maximized: Some(false),
-            //min_inner_size: Some(Vec2::new(1920.0, 1080.0)), // Set the desired full screen size
             decorations: Some(false),
             title: Some(APP_TITLE.to_string()),
             resizable: Some(false),
-            //position: Some(Pos2::new(0.0, 0.0)),
             window_type: Option::from(X11WindowType::Toolbar),
             ..Default::default()
         },
@@ -66,7 +62,6 @@ fn main() {
     };
 
     if is_secondary {
-        //println!("Running Secondary App");
         eframe::run_native(
             "Resize Me",
             options2,
