@@ -21,6 +21,9 @@ use std::env;
 use std::io::Write;
 use std::process::Command;
 
+use display_info::DisplayInfo;
+use winit::event_loop::EventLoop;
+
 lazy_static! {
     pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> =
         Arc::new(Mutex::new(CaptureArea::default()));
@@ -92,7 +95,15 @@ pub enum PageView {
     Receiver,
 }
 
+#[derive(Debug, Clone)]
+struct MonitorInfo {
+    id: usize,
+    name: String,
+    position: (i32, i32),
+}
+
 impl RustreamApp {
+
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
@@ -299,16 +310,28 @@ impl RustreamApp {
                     self.is_selecting ^= ui.button("Select Capture Area").clicked();
 
                     if self.is_selecting {
-                        println!("{:?}", self.capture_area);
+                        //println!("{:?}", self.capture_area);
                         //creating a transparent window with egui-overlay
 
                         // Open a new full-size window for selecting capture area
                         //check if the process with arg --secondary is opened yet
-
+                        //shows in console value of selected_monitor
+                        //log::info!("Selected Monitor: {}", selected_monitor);
+                        let displays = DisplayInfo::all().unwrap_or_default();
+                        let display = displays.get(*selected_monitor).unwrap_or_else(|| {
+                            log::error!("Monitor not found: {}", selected_monitor);
+                            std::process::exit(1);
+                        });
+                        //display name + x and y
+                        log::info!("Display: {} ({}x{}) ({}x{})", display.name, display.x, display.y,display.width,display.height);
                         let output = Command::new(env::current_exe().unwrap())
-                            .arg("--secondary")
-                            .output()
-                            .expect("failed to execute process");
+                        .arg("--secondary")
+                        .arg(display.x.to_string())
+                        .arg(display.y.to_string())
+                        .arg(display.width.to_string())
+                        .arg(display.height.to_string())
+                        .output()
+                        .expect("failed to execute process");
 
                             if output.status.success() {
                                 // Parse stdout with error handling

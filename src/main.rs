@@ -13,7 +13,7 @@ mod secondaryapp;
 
 use app::{RustreamApp};
 use secondaryapp::{SecondaryApp};
-use egui::{Vec2, ViewportBuilder, X11WindowType};
+use egui::{Vec2, ViewportBuilder, X11WindowType, Pos2};
 use env_logger::Env;
 use log::LevelFilter;
 
@@ -46,6 +46,30 @@ fn main() {
         ..Default::default()
     };
 
+    let (window_x, window_y) = if is_secondary {
+        let x = args.get(2)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let y = args.get(3)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        (x, y)
+    } else {
+        (0.0, 0.0)
+    };
+
+    let (width, height) = if is_secondary {
+        let w = args.get(4)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1920.0);
+        let h = args.get(5)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1080.0);
+        (w, h)
+    } else {
+        (1920.0, 1080.0)
+    };
+
     let options2 = NativeOptions {
         renderer: eframe::Renderer::Glow,
         //persist_window: true,
@@ -54,14 +78,17 @@ fn main() {
             fullscreen: Some(false),
             maximized: Some(true),
             decorations: Some(false),
+            position: Some(Pos2::new(window_x, window_y)),
             title: Some(APP_TITLE.to_string()),
             resizable: Some(false),
             window_type: Option::from(X11WindowType::Toolbar),
+            inner_size: Some(Vec2::new(width, height)),
             ..Default::default()
         },
 
         ..Default::default()
     };
+
 
     if is_secondary {
         eframe::run_native(
