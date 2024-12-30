@@ -65,16 +65,40 @@ fn main() {
 
     if is_secondary {
         let selected_monitor = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-        
-        eframe::run_native(
-            "Resize Me",
-            options2,
-            Box::new(|_cc| Ok(Box::new(SecondaryApp::new(selected_monitor)))),
-        )
-        .expect("Failed to run Resize Screen");
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+    
+        // Get monitor information
+        if let Ok(displays) = scrap::Display::all() {
+            if let Some(display) = displays.get(selected_monitor) {
+                let options2 = NativeOptions {
+                    renderer: eframe::Renderer::Glow,
+                    viewport: ViewportBuilder {
+                        position: Some([
+                            (display.width() as f32 * selected_monitor as f32),
+                            0.0
+                        ].into()),
+                        inner_size: Some([
+                            display.width() as f32,
+                            display.height() as f32
+                        ].into()),
+                        transparent: Some(true),
+                        decorations: Some(false),
+                        resizable: Some(false),
+                        window_level: Some(egui::WindowLevel::AlwaysOnTop),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+    
+                eframe::run_native(
+                    "Resize Me",
+                    options2,
+                    Box::new(|_cc| Ok(Box::new(SecondaryApp::new(selected_monitor)))),
+                ).expect("Failed to run Resize Screen");
+            }
+        }
     } else {
         eframe::run_native(
             APP_TITLE,
