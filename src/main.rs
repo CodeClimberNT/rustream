@@ -9,8 +9,10 @@ mod config;
 mod hotkey;
 mod screen_capture;
 mod video_recorder;
+mod secondaryapp;
 
-use app::{RustreamApp, SecondaryApp};
+use app::{RustreamApp};
+use secondaryapp::{SecondaryApp};
 use egui::{Vec2, ViewportBuilder, X11WindowType};
 use env_logger::Env;
 use log::LevelFilter;
@@ -49,8 +51,8 @@ fn main() {
         //persist_window: true,
         viewport: ViewportBuilder {
             transparent: Some(true),
-            fullscreen: Some(true),
-            maximized: Some(false),
+            fullscreen: Some(false),
+            maximized: Some(true),
             decorations: Some(false),
             title: Some(APP_TITLE.to_string()),
             resizable: Some(false),
