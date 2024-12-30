@@ -64,10 +64,15 @@ fn main() {
     };
 
     if is_secondary {
+        let selected_monitor = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+        
         eframe::run_native(
             "Resize Me",
             options2,
-            Box::new(|_cc| Ok(Box::new(SecondaryApp::default()))),
+            Box::new(|_cc| Ok(Box::new(SecondaryApp::new(selected_monitor)))),
         )
         .expect("Failed to run Resize Screen");
     } else {

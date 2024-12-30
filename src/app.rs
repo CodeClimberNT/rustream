@@ -304,9 +304,10 @@ impl RustreamApp {
 
                         // Open a new full-size window for selecting capture area
                         //check if the process with arg --secondary is opened yet
-
+                        let selected_monitor = self.config.lock().unwrap().capture.selected_monitor;
                         let output = Command::new(env::current_exe().unwrap())
                             .arg("--secondary")
+                            .arg(selected_monitor.to_string())
                             .output()
                             .expect("failed to execute process");
 

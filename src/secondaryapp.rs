@@ -11,6 +11,22 @@ pub struct SecondaryApp {
     drag_start: Option<Pos2>,
     new_capture_area: Option<Rect>,
     show_popup: bool,
+    selected_monitor: usize,
+}
+
+impl SecondaryApp {
+
+    pub fn new(monitor: usize) -> Self {
+        Self {
+            is_selecting: false,
+            capture_area: None,
+            drag_start: None,
+            new_capture_area: None,
+            show_popup: false,
+            selected_monitor: monitor,
+        }
+    }
+
 }
 
 impl eframe::App for SecondaryApp {
