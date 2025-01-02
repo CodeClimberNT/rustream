@@ -22,6 +22,7 @@ use eframe::NativeOptions;
 const APP_TITLE: &str = "RUSTREAM";
 
 fn main() {
+
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
@@ -58,23 +59,31 @@ fn main() {
         (0.0, 0.0)
     };
 
-    let (width, height) = if is_secondary {
+    let (width, height, scale_factor) = if is_secondary {
         let w = args.get(4)
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1920.0);
         let h = args.get(5)
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1080.0);
-        let scale_factor = args.get(6)
+        let scale = args.get(6)
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.0);
-        (w / scale_factor , h / scale_factor )
+            .unwrap_or(1.9);
+        
+
+        //apply scale factor to the window size
+        let scaled_width = w * scale;
+        let scaled_height = h * scale;
+
+        (scaled_width ,scaled_height , scale)
 
         
     } else {
-        (1920.0, 1080.0)
+        (1920.0, 1080.0, 1.0)
     };
 
+    //scale width height and scale factor
+    log::info!("width: {}, height: {}, scale_factor: {}", width, height, scale_factor);
     //apply the scale factor to the window size
      
 
@@ -84,7 +93,7 @@ fn main() {
         viewport: ViewportBuilder {
             transparent: Some(true),
             fullscreen: Some(false),
-            //maximized: Some(true),
+            maximized: Some(true),
             decorations: Some(false),
             position: Some(Pos2::new(window_x, window_y)),
             title: Some(APP_TITLE.to_string()),

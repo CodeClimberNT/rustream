@@ -59,9 +59,15 @@ serde_json = { version = "1.0.134", features = [
     "std",
 ], default-features = false }
 winit = "0.28.7"
-display-info = "0.5.2"
-
-
+display-info = {git = "https://github.com/DanieleBrCoding/display-info"}
+windows-sys = "0.59.0"
+windows = { version = "0.56.0", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging"
+]}
 [profile.dev]
 opt-level = 1
 # Enable a large amount of optimization in the dev profile for dependencies.

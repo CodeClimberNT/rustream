@@ -328,12 +328,13 @@ impl RustreamApp {
                         //shows in console value of selected_monitor
                         //log::info!("Selected Monitor: {}", selected_monitor);
                         let displays = DisplayInfo::all().unwrap_or_default();
+                        //log::info!("Displays: {:?}", displays);
                         let display = displays.get(*selected_monitor).unwrap_or_else(|| {
                             log::error!("Monitor not found: {}", selected_monitor);
                             std::process::exit(1);
                         });
                         //display name + x and y
-                        log::info!("Display: {} ({}x{}) ({}x{}) {}", display.name, display.x, display.y,display.width,display.height, display.scale_factor);
+                        log::info!("Display: {} ({},{}) ({}x{}) {}", display.name, display.x, display.y,display.width,display.height, display.scale_factor);
                         let output = Command::new(env::current_exe().unwrap())
                         .arg("--secondary")
                         .arg(display.x.to_string())

@@ -736,8 +736,7 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 [[package]]
 name = "display-info"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d5fb296340ffc0419a6032d03a253b89aaa0c52ec5e4847da1f76ad2412fe3"
+source = "git+https://github.com/DanieleBrCoding/display-info#7400c591f64761d46b8d250f383b5509b2a88e92"
 dependencies = [
  "anyhow",
  "core-graphics 0.23.2",
@@ -2846,6 +2845,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.9",
+ "windows 0.56.0",
+ "windows-sys 0.59.0",
  "winit 0.28.7",
 ]
 
