@@ -47,6 +47,7 @@ pub struct RustreamApp {
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
     triggered_actions: Vec<HotkeyAction>,
+    previous_monitor: usize,
 }
 
 
@@ -100,6 +101,7 @@ struct MonitorInfo {
     id: usize,
     name: String,
     position: (i32, i32),
+    
 }
 
 impl RustreamApp {
@@ -152,6 +154,7 @@ impl RustreamApp {
             show_config: false,
             editing_hotkey: None,
             triggered_actions: Vec::new(),
+            previous_monitor: 0,
         }
     }
 
@@ -294,6 +297,8 @@ impl RustreamApp {
                 
                 // Monitor selection
                 let selected_monitor = &mut config.capture.selected_monitor;
+                let current_monitor= *selected_monitor;
+
                 ComboBox::from_label("Monitor")
                     .selected_text(format!("Monitor {}", selected_monitor))
                     .show_ui(ui, |ui| {
@@ -302,8 +307,13 @@ impl RustreamApp {
                             .iter()
                             .enumerate()
                             .for_each(|(i, m)| {
-                                ui.selectable_value(selected_monitor, i, m);
-                            });
+                            if ui.selectable_value(selected_monitor, i, m).clicked() {
+                            if current_monitor != self.previous_monitor {
+                            self.capture_area = None;
+                            self.previous_monitor = current_monitor;
+                    }
+                }
+            });
                     });
 
                 ui.horizontal(|ui| {
