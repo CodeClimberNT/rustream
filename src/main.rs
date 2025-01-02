@@ -65,10 +65,18 @@ fn main() {
         let h = args.get(5)
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1080.0);
-        (w, h)
+        let scale_factor = args.get(6)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0);
+        (w / scale_factor , h / scale_factor )
+
+        
     } else {
         (1920.0, 1080.0)
     };
+
+    //apply the scale factor to the window size
+     
 
     let options2 = NativeOptions {
         renderer: eframe::Renderer::Glow,
@@ -76,7 +84,7 @@ fn main() {
         viewport: ViewportBuilder {
             transparent: Some(true),
             fullscreen: Some(false),
-            maximized: Some(true),
+            //maximized: Some(true),
             decorations: Some(false),
             position: Some(Pos2::new(window_x, window_y)),
             title: Some(APP_TITLE.to_string()),

@@ -323,13 +323,14 @@ impl RustreamApp {
                             std::process::exit(1);
                         });
                         //display name + x and y
-                        log::info!("Display: {} ({}x{}) ({}x{})", display.name, display.x, display.y,display.width,display.height);
+                        log::info!("Display: {} ({}x{}) ({}x{}) {}", display.name, display.x, display.y,display.width,display.height, display.scale_factor);
                         let output = Command::new(env::current_exe().unwrap())
                         .arg("--secondary")
                         .arg(display.x.to_string())
                         .arg(display.y.to_string())
                         .arg(display.width.to_string())
                         .arg(display.height.to_string())
+                        .arg(display.scale_factor.to_string())
                         .output()
                         .expect("failed to execute process");
 
