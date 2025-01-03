@@ -1,10 +1,16 @@
-use std::{net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::net::UdpSocket;
-use std::sync::{Arc};
+use std::sync::Arc;
 use crate::frame_grabber::{CapturedFrame};
 use tokio::sync::Mutex;
+use std::mem;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
-#[derive(Clone)]
+const MAX_DATAGRAM_SIZE: usize = 1024;
+const HEADER_SIZE: usize = std::mem::size_of::<u8>(); // Size of sequence number
+
+//#[derive(Clone)]
 pub struct Sender {
     socket: Arc<UdpSocket>,
     receivers: Arc<Mutex<Vec<SocketAddr>>>,
@@ -62,13 +68,20 @@ impl Sender {
             return Ok(());  // Return early if no receivers
         }
         //loop {
+
+        let mut seq_num: u8 = 0;   
+        for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - HEADER_SIZE) {
             
-        for chunk in encoded_frame.chunks(1024) {
+            let mut pkt = Vec::new();
+            pkt.push(seq_num); //&seq_num.to_ne_bytes()
+            pkt.extend_from_slice(chunk);
+
             for &peer in receivers.iter() {
-                if let Err(e) = self.socket.send_to(chunk, peer).await {
+                if let Err(e) = self.socket.send_to(&pkt, peer).await {
                     eprintln!("Error sending to {}: {}", peer, e);
                 }
             }
+            seq_num += 1;
         }
         Ok(())
         
@@ -78,10 +91,6 @@ impl Sender {
 pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
     sender.listen_for_receivers().await;
-    sender.send_data(frame).await
-}
-
-pub async fn send_frame(sender: &Sender, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     sender.send_data(frame).await
 }
 
@@ -111,7 +120,7 @@ pub async fn send_frame(sender: &Sender, frame: CapturedFrame) -> Result<(), Box
 //send datagram to caster to request the streaming
 pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box<dyn std::error::Error>> {
     
-    let socket = UdpSocket::bind("0.0.0.0:8081").await?;
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
     let buf = "REQ_FRAME".as_bytes();
     socket.connect(sender_addr).await?; //connects socket only to send/receive from sender_Addr
     match socket.try_send(buf) {
@@ -122,13 +131,93 @@ pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box
 
 pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<(), Box<dyn std::error::Error>>{
     
-    let mut buf = [0; 1024];
-    match socket.try_recv_from(&mut buf) {
-        Ok(_) => Ok(()) , //reconstruct chunks and decode from h264
-        Err(_) => Err("Failed to receive data")?,
+    let mut buf = Vec::new(); //[0; 1024];
+    let mut frame_chunks: Vec<(u8, u8)> = Vec::new();
+    loop {
+        match socket.try_recv_from(&mut buf) {
+            Ok(_) => {
+                frame_chunks.push((buf[0], buf[1])); //vedere se si deve controllare il numero di chunks
+                //riordinare chunks e decodificare da h264
+                println!("Received chunk from sender: {:?}", buf);
+   
+            }, //reconstruct chunks and decode from h264
+            Err(_) => Err("Failed to receive data")?,
+        }
     }
-    //vedere se posso fare semplicemete connect e poi verifico nel sendere se la socket è connessa
-    
+}
 
+fn decode_from_h264_to_rgba(frame: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>{
+    
+    let (width, height) = get_h264_dimensions(frame.clone())?;
+
+    let mut ffmpeg = Command::new("ffmpeg")
+            .args([
+                "-f", "h264",           // input format is H.
+                "-i", "-", // input from stdin
+                "-preset", "ultrafast",
+                "-f", "rawvideo", // output raw
+                "-pixel_format", "rgba", // convert to rgba
+                "-video_size", &format!("{}x{}", width, height), 
+                "-", // output to stdout
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()) // Ignora errori di ffmpeg per semplicità
+            .spawn()?;
+
+        // write encoded frame in stdin
+        ffmpeg.stdin.as_mut().unwrap().write_all(&frame)?;
+
+        // read H.264 encoded data from stdout
+        let output = ffmpeg.wait_with_output()?;
+        if !output.status.success() {
+            return Err("FFmpeg encoding failed".into());
+        }
+
+        Ok(output.stdout)
+    
+}
+
+fn get_h264_dimensions(frame: Vec<u8>) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+    // Run ffprobe to extract the width and height
+    let mut ffprobe = Command::new("ffprobe")
+        .args([
+            "-i", "-", // input from stdin
+            "-v", "error", // Suppress unnecessary output
+            "-select_streams", "v:0", // Select the first video stream
+            "-show_entries", "stream=width,height", // Show width and height
+            "-of", "csv=p=0", // Format output as CSV (plain text)
+            "-", // output to stdout
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null()) // Ignora errori di ffmpeg per semplicità
+        .spawn()?;
+        //.output()?; // Execute the command and capture the output
+
+    /*if !output.status.success() {
+        return Err(format!("ffprobe failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+    }*/
+
+    // write encoded frame in stdin
+    ffprobe.stdin.as_mut().unwrap().write_all(&frame)?;
+
+    // read H.264 encoded data from stdout
+    let output = ffprobe.wait_with_output()?;
+    if !output.status.success() {
+        return Err("FFmpeg encoding failed".into());
+    }
+
+    // Parse the width and height from the output
+    let output_str = String::from_utf8(output.stdout)?;
+    let dims: Vec<&str> = output_str.trim().split(',').collect();
+    if dims.len() != 2 {
+        return Err("Unexpected output format from ffprobe".into());
+    }
+
+    let width: u32 = dims[0].parse()?;
+    let height: u32 = dims[1].parse()?;
+
+    Ok((width, height))
 }
 

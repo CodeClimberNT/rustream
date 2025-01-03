@@ -2,13 +2,11 @@ use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
-use crate::data_streaming::{Sender, start_streaming, send_frame};
+use crate::data_streaming::{Sender, start_streaming};
 use tokio::sync::oneshot::channel;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync;
-use tokio::task;
 
 use eframe::egui;
 use egui::{
@@ -38,7 +36,7 @@ pub struct RustreamApp {
     new_capture_area: Option<Rect>,
     show_config: bool, // Add this field
     sender: Option<Arc<Sender>>,
-    sender_receiver: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
+    sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
 }
 
 #[derive(Default, Debug)]
@@ -101,16 +99,9 @@ impl RustreamApp {
             video_recorder,
             textures,
             sender: None,
-            sender_receiver: None,
+            sender_rx: None,
             streaming_active: false,
             ..Default::default()
-        }
-    }
-
-    async fn initialize_sender(&mut self) {
-        if self.sender.is_none() {
-            let sender = Arc::new(Sender::new().await);
-            self.sender = Some(sender);
         }
     }
 
@@ -451,7 +442,6 @@ impl RustreamApp {
                     ));
                 }
                 
-                
             
                 if self.streaming_active {
                     // Initialize sender if it doesn't exist
@@ -465,7 +455,7 @@ impl RustreamApp {
 
                     // Initialize sender if it doesn't exist
                     if self.sender.is_none() {
-                        let  (tx, rx) = tokio::sync::oneshot::channel();
+                        let  (tx, rx) = channel();
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
@@ -474,14 +464,14 @@ impl RustreamApp {
                         
 
                         // Check if we have a pending sender initialization
-                        if let Some(mut rx) = self.sender_receiver.take() {
+                        if let Some(mut rx) = self.sender_rx.take() {
                             // Try to receive the sender
                             if let Ok(sender) = rx.try_recv() {
                                 self.sender = Some(sender);
                             }
                         } else {
                             // Put the receiver back if we haven't received yet
-                            self.sender_receiver = Some(rx);
+                            self.sender_rx = Some(rx);
                         }
                     }
 
