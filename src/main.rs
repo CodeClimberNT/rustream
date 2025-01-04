@@ -62,8 +62,8 @@ fn main() {
         
 
         //apply scale factor to the window size
-        let scaled_width = w * scale;
-        let scaled_height = h * scale;
+        let scaled_width = w / scale;
+        let scaled_height = h / scale;
 
         (scaled_width ,scaled_height , scale)
 
@@ -79,7 +79,7 @@ fn main() {
         let y = args.get(3)
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(0.0);
-        (x / scale_factor, y / scale_factor)
+        (x, y)
     } else {
         (0.0, 0.0)
     };
@@ -97,7 +97,7 @@ fn main() {
             fullscreen: Some(false),
             maximized: Some(true), 
             decorations: Some(false),
-            position: Some(Pos2::new(window_x, window_y)),
+            position: Some(Pos2::new(window_x / scale_factor, window_y / scale_factor)),
             title: Some(APP_TITLE.to_string()),
             resizable: Some(false),
             window_type: Option::from(X11WindowType::Toolbar),
