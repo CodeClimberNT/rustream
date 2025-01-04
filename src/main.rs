@@ -68,7 +68,7 @@ fn main() {
             .unwrap_or(1080.0);
         let scale = args.get(6)
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.9);
+            .unwrap_or(1.0);
         
 
         //apply scale factor to the window size
@@ -93,7 +93,7 @@ fn main() {
         viewport: ViewportBuilder {
             transparent: Some(true),
             fullscreen: Some(false),
-            maximized: Some(true),
+            maximized: Some(false),
             decorations: Some(false),
             position: Some(Pos2::new(window_x, window_y)),
             title: Some(APP_TITLE.to_string()),
