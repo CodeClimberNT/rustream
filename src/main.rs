@@ -47,17 +47,7 @@ fn main() {
         ..Default::default()
     };
 
-    let (window_x, window_y) = if is_secondary {
-        let x = args.get(2)
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(0.0);
-        let y = args.get(3)
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(0.0);
-        (x, y)
-    } else {
-        (0.0, 0.0)
-    };
+    
 
     let (width, height, scale_factor) = if is_secondary {
         let w = args.get(4)
@@ -82,6 +72,18 @@ fn main() {
         (1920.0, 1080.0, 1.0)
     };
 
+    let (window_x, window_y) = if is_secondary {
+        let x = args.get(2)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let y = args.get(3)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        (x / scale_factor, y / scale_factor)
+    } else {
+        (0.0, 0.0)
+    };
+
     //scale width height and scale factor
     log::info!("width: {}, height: {}, scale_factor: {}", width, height, scale_factor);
     //apply the scale factor to the window size
@@ -93,7 +95,7 @@ fn main() {
         viewport: ViewportBuilder {
             transparent: Some(true),
             fullscreen: Some(false),
-            maximized: Some(false),
+            maximized: Some(true), 
             decorations: Some(false),
             position: Some(Pos2::new(window_x, window_y)),
             title: Some(APP_TITLE.to_string()),
