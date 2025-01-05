@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
+use std::io::ErrorKind::WouldBlock;
 use std::sync::Arc;
 use crate::frame_grabber::{CapturedFrame};
 use tokio::sync::Mutex;
@@ -22,6 +23,7 @@ impl Sender {
     //implementare il fatto che l'ack da mandare dopo aver ricevuto richiesta dal client deve contenere la porta su cui il client deve connettersi (ma dovrebbe già saperla per fare richiesta teoricamente)
     pub async fn new() -> Self {
         let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap(); 
+        println!("Socket {} ",  sock.local_addr().unwrap());
         /*let sock = match sock {
             Ok(socket) => socket,
             Err(_) => {
@@ -47,11 +49,13 @@ impl Sender {
             loop {
                 match socket.recv_from(&mut buf).await {
                     Ok((_, peer_addr)) => {
+                        println!("Received connection request from: {}", &peer_addr);
                         let mut receivers = receivers.lock().await;
                         if !receivers.contains(&peer_addr) {
                             receivers.push(peer_addr);
-                            println!("New receiver connected: {}", peer_addr);
+                            
                         }
+                        println!("New receiver connected: {}", peer_addr);
                     }
                     Err(e) => eprintln!("Error receiving connection: {}", e),
                 }
@@ -62,26 +66,30 @@ impl Sender {
     pub async fn send_data(&self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     
         let encoded_frame= frame.encode_to_h264()?;
+        println!("Frame encoded to h264");
         let receivers = self.receivers.lock().await;
         
         if receivers.is_empty() {
+            println!("No receivers connected");
             return Ok(());  // Return early if no receivers
         }
         //loop {
 
-        let mut seq_num: u8 = 0;   
+        let mut seq_num: u16 = 0;   
         for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - HEADER_SIZE) {
             
             let mut pkt = Vec::new();
-            pkt.push(seq_num); //&seq_num.to_ne_bytes()
+            pkt.push(seq_num as u8); //&seq_num.to_ne_bytes()
             pkt.extend_from_slice(chunk);
 
             for &peer in receivers.iter() {
                 if let Err(e) = self.socket.send_to(&pkt, peer).await {
                     eprintln!("Error sending to {}: {}", peer, e);
                 }
+                println!("Sent chunk {:?} to peer {}", seq_num, peer);
             }
             seq_num += 1;
+            println!("Sent chunk {:?}", seq_num);
         }
         Ok(())
         
@@ -90,7 +98,16 @@ impl Sender {
 
 pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
-    sender.listen_for_receivers().await;
+    //sender.listen_for_receivers().await;
+
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let sender_clone = sender.clone();
+        tokio::spawn(async move {
+            sender_clone.listen_for_receivers().await;
+        });
+    });
+
     sender.send_data(frame).await
 }
 
@@ -117,12 +134,21 @@ pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Resul
     
 }*/
 
+pub struct Receiver {
+    socket: Arc<UdpSocket>,
+    caster: Arc<Mutex<SocketAddr>>,
+}
+
+impl Receiver {
+
+}
+
 //send datagram to caster to request the streaming
-pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box<dyn std::error::Error>> {
+pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {
     
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     let buf = "REQ_FRAME".as_bytes();
-    socket.connect(sender_addr).await?; //connects socket only to send/receive from sender_Addr
+    socket.connect(sender_addr).await?; //connects socket to send/receive only from sender_addr
     match socket.try_send(buf) {
         Ok(_) => Ok(socket), 
         Err(_) => Err("Failed to connect to sender")?,
@@ -131,22 +157,35 @@ pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box
 
 pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<(), Box<dyn std::error::Error>>{
     
-    let mut buf = Vec::new(); //[0; 1024];
-    let mut frame_chunks: Vec<(u8, u8)> = Vec::new();
+    
+    //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
+    let mut frame_chunks: Vec<(u8, Vec<u8>)> = Vec::new();
+    
     loop {
+
+        socket.readable().await?;
+        let mut buf =  vec![0; MAX_DATAGRAM_SIZE];
+
         match socket.try_recv_from(&mut buf) {
-            Ok(_) => {
-                frame_chunks.push((buf[0], buf[1])); //vedere se si deve controllare il numero di chunks
+            Ok((len, _)) => {
+
+                let seq_num = buf[0];
+                let chunk_data = buf[1..len].to_vec();
+                frame_chunks.push((seq_num, chunk_data));
+
                 //riordinare chunks e decodificare da h264
-                println!("Received chunk from sender: {:?}", buf);
+                println!("Received chunk {:?} from sender:", seq_num);
    
             }, //reconstruct chunks and decode from h264
-            Err(_) => Err("Failed to receive data")?,
+            Err(ref e) if e.kind() == WouldBlock => {
+                continue;
+            },
+            Err(e) => println!("Error in receiving data {:?}", e), //dà WouldBlock, non trova dati da leggere
         }
     }
 }
 
-fn decode_from_h264_to_rgba(frame: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>{
+fn decode_from_h264_to_rgba(frame: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>{
     
     let (width, height) = get_h264_dimensions(frame.clone())?;
 
@@ -178,7 +217,7 @@ fn decode_from_h264_to_rgba(frame: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::erro
     
 }
 
-fn get_h264_dimensions(frame: Vec<u8>) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+fn get_h264_dimensions(frame: Vec<u8>) -> Result<(u32, u32), Box<dyn std::error::Error + Send + Sync>> {
     // Run ffprobe to extract the width and height
     let mut ffprobe = Command::new("ffprobe")
         .args([

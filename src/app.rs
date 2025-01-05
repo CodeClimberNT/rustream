@@ -2,8 +2,9 @@ use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
-use crate::data_streaming::{Sender, start_streaming};
+use crate::data_streaming::{Sender, start_streaming, connect_to_sender, recv_data};
 use tokio::sync::oneshot::channel;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -452,10 +453,12 @@ impl RustreamApp {
                             self.sender = Some(sender);
                         });
                     }*/
-
+                    let mut created = false;
                     // Initialize sender if it doesn't exist
-                    if self.sender.is_none() {
+                    if self.sender.is_none() && !created {
                         let  (tx, rx) = channel();
+                        created = true;
+
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
@@ -487,79 +490,6 @@ impl RustreamApp {
                         });
                     }
                 }
-                
-                    /*let create_sender = async {
-                        self.sender_options = Some(Sender::new().await);
-                    };*/
-                    // Spawn the async block to run it
-                    
-                    //let screen = screen_image.clone();
-                    /*let (tx, rx) = tokio::sync::oneshot::channel();
-                    let lock = self.sender_options.lock().await; //expect("Failed to lock self.sender_options");
-                    if lock.is_none() {
-                        let sender_options = self.sender_options.clone();
-                        
-                        tokio::spawn(async move {
-                            let sender = Sender::new().await;
-                            let mut lock = sender_options.lock().expect("Failed to lock sender options");
-                            *lock = Some(sender);
-                            
-                            let _ = tx.send(());
-                            
-                        });
-
-                        //self.sender_options = Some(join_handle.await??);
-                    }
-                    else{
-                        let _ = tx.send(());
-                    }
-                    let send_op = self.sender_options.clone();
-                    tokio::spawn(async move {
-                        let _ = rx.await;  //wait for signal to start
-                        //let sender_options = self.sender_options.clone();
-                        //let mut lock = send_op.lock().expect("Failed to lock sender options");
-                       
-                        let mut lock = send_op.lock().unwrap();
-                       
-                        
-                        if let Err(e) = cast_streaming(send_op, screen).await {
-                            eprintln!("Error in cast_streaming: {}", e);
-                        }
-                    });*/
-
-                    //cast_streaming(self.sender_options.clone(), screen);
-
-                    /*let screen = screen_image.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    let sender_options = self.sender_options.clone();
-                    
-                    let sender_options_clone = sender_options.clone();
-                    let screen_clone = screen.clone();
-                    
-                    
-                    tokio::spawn(async move {
-                        if sender_options_clone.lock().await.is_none() {
-                            let sender = Sender::new().await;
-                            let mut lock = sender_options_clone.lock().await;
-                            *lock = Some(sender);
-
-                            let _ = tx.send(());
-                        } else {
-                            let _ = tx.send(());
-                        }
-                    });
-
-                    let send_op = self.sender_options.clone();
-                    tokio::spawn(async move {
-                        let _ = rx.await;  // wait for signal to start
-                        let mut lock = send_op.lock().await;
-                        if let Some(sender) = &mut *lock {
-                            if let Err(e) = cast_streaming(sender, screen_clone).await {
-                                eprintln!("Error in cast_streaming: {}", e);
-                            }
-                        }
-                    });*/
-
             }
 
             let texture = self
@@ -608,7 +538,7 @@ impl RustreamApp {
     }
 
     pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
-        ui.disable();
+        //ui.disable();
         ui.heading("Receiver Mode");
         ui.vertical_centered(|ui| {
             ui.label("Enter the Sender's IP Address");
@@ -620,10 +550,54 @@ impl RustreamApp {
                 ui.label(format!("Address:{}", self.address_text));
                 debug!("Address: {}", self.address_text);
             }
+
+            ui.add_space(20.0);
+
+            let address_not_empty = !self.address_text.trim().is_empty();
+
+            if ui.add_enabled(address_not_empty, egui::Button::new("Connect")).clicked(){
+
+                //check if inserted address is valid
+                if !self.address_text.parse::<SocketAddr>().is_ok(){   //Ipv4Addr
+                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                }
+                else{
+
+                    let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
+                    let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
+                    addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
+
+                    let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
+                        addr_vec[0].parse::<u8>().unwrap(), 
+                        addr_vec[1].parse::<u8>().unwrap(), 
+                        addr_vec[2].parse::<u8>().unwrap(), 
+                        addr_vec[3].parse::<u8>().unwrap())), 
+                        port.parse::<u16>().unwrap());
+                    
+                    tokio::spawn(async move {
+                        let socket = connect_to_sender(caster_addr).await;
+                        match socket {
+                            Ok(socket) => {
+                                println!("Connected to Sender");
+                                if let Err(e) = recv_data(caster_addr, socket).await {
+                                    eprintln!("Failed to receive data: {}", e);
+                                }
+                            }
+                            Err(_) => {
+                                println!("No data received");
+                            }
+                        }
+                    });
+                }
+            }
         });
-        ui.button("Connect")
-            .on_disabled_hover_text("NOT IMPLEMENTED")
-            .on_hover_cursor(egui::CursorIcon::NotAllowed);
+
+        
+
+            
+        
+            //.on_disabled_hover_text("NOT IMPLEMENTED")
+            //.on_hover_cursor(egui::CursorIcon::NotAllowed);
     }
 
     /// Add a texture to the texture map

@@ -58,7 +58,7 @@ impl CapturedFrame {
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null()) // Ignora errori di ffmpeg per semplicità
+            .stderr(Stdio::piped()) // Stdio::null() Ignora errori di ffmpeg per semplicità
             .spawn()?;
 
         // write RGBA data in stdin
