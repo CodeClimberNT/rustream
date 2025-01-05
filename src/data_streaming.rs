@@ -8,10 +8,10 @@ use std::mem;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-const MAX_DATAGRAM_SIZE: usize = 1024;
-const HEADER_SIZE: usize = std::mem::size_of::<u8>(); // Size of sequence number
+const MAX_DATAGRAM_SIZE: usize = 65507; //1472
+const SEQ_NUM_SIZE: usize = std::mem::size_of::<u8>(); // Size of sequence number
 
-//#[derive(Clone)]
+//#[derive(Clone)]      
 pub struct Sender {
     socket: Arc<UdpSocket>,
     receivers: Arc<Mutex<Vec<SocketAddr>>>,
@@ -41,7 +41,7 @@ impl Sender {
     }
 
     pub async fn listen_for_receivers(&self) {
-        let mut buf = [0; 1024];
+        let mut buf = [0; 1472];
         let receivers = self.receivers.clone();
         let socket = self.socket.clone();
         
@@ -74,10 +74,14 @@ impl Sender {
             return Ok(());  // Return early if no receivers
         }
         //loop {
-
+        //const frame_size = std::mem::size_of::<encoded_frame>();
+        //let num_pkts_per_frame = ( as f32 / (MAX_DATAGRAM_SIZE - SEQ_NUM_SIZE) as f32).ceil();
+        
         let mut seq_num: u16 = 0;   
-        for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - HEADER_SIZE) {
-            
+        //267
+        //total_chunks = 412 with MAX_DATAGRAM_SIZE = 1024, 273with MAX_DATAGRAM_SIZE = 1472
+        for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - SEQ_NUM_SIZE) {
+      
             let mut pkt = Vec::new();
             pkt.push(seq_num as u8); //&seq_num.to_ne_bytes()
             pkt.extend_from_slice(chunk);
@@ -89,7 +93,6 @@ impl Sender {
                 println!("Sent chunk {:?} to peer {}", seq_num, peer);
             }
             seq_num += 1;
-            println!("Sent chunk {:?}", seq_num);
         }
         Ok(())
         
@@ -98,16 +101,7 @@ impl Sender {
 
 pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
-    //sender.listen_for_receivers().await;
-
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        let sender_clone = sender.clone();
-        tokio::spawn(async move {
-            sender_clone.listen_for_receivers().await;
-        });
-    });
-
+    sender.listen_for_receivers().await;
     sender.send_data(frame).await
 }
 
@@ -160,7 +154,7 @@ pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<(),
     
     //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
     let mut frame_chunks: Vec<(u8, Vec<u8>)> = Vec::new();
-    
+
     loop {
 
         socket.readable().await?;
