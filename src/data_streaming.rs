@@ -8,6 +8,7 @@ use std::mem;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+pub const PORT: u16 = 56123;
 const MAX_DATAGRAM_SIZE: usize = 65507; //1472
 const SEQ_NUM_SIZE: usize = std::mem::size_of::<u8>(); // Size of sequence number
 
@@ -22,7 +23,8 @@ impl Sender {
     //initialize caster UdpSocket 
     //implementare il fatto che l'ack da mandare dopo aver ricevuto richiesta dal client deve contenere la porta su cui il client deve connettersi (ma dovrebbe già saperla per fare richiesta teoricamente)
     pub async fn new() -> Self {
-        let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap(); 
+        let addr = format!("0.0.0.0:{}", PORT);
+        let sock = UdpSocket::bind(addr).await.unwrap(); 
         println!("Socket {} ",  sock.local_addr().unwrap());
         /*let sock = match sock {
             Ok(socket) => socket,
@@ -128,14 +130,14 @@ pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Resul
     
 }*/
 
-pub struct Receiver {
+/*pub struct Receiver {
     socket: Arc<UdpSocket>,
     caster: Arc<Mutex<SocketAddr>>,
 }
 
 impl Receiver {
 
-}
+}*/
 
 //send datagram to caster to request the streaming
 pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box<dyn std::error::Error + Send + Sync>> {

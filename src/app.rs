@@ -2,7 +2,7 @@ use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
-use crate::data_streaming::{Sender, start_streaming, connect_to_sender, recv_data};
+use crate::data_streaming::{Sender, start_streaming, connect_to_sender, recv_data, PORT};
 use tokio::sync::oneshot::channel;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 
@@ -38,6 +38,7 @@ pub struct RustreamApp {
     show_config: bool, // Add this field
     sender: Option<Arc<Sender>>,
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
+    socket_created: bool,
 }
 
 #[derive(Default, Debug)]
@@ -102,6 +103,7 @@ impl RustreamApp {
             sender: None,
             sender_rx: None,
             streaming_active: false,
+            socket_created: false,
             ..Default::default()
         }
     }
@@ -118,6 +120,8 @@ impl RustreamApp {
         self.page = PageView::default();
         self.address_text.clear();
         self.sender = None;
+        self.socket_created = false;
+        self.streaming_active = false;
     }
 
     fn set_page(&mut self, page: PageView) {
@@ -453,11 +457,11 @@ impl RustreamApp {
                             self.sender = Some(sender);
                         });
                     }*/
-                    let mut created = false;
+                    
                     // Initialize sender if it doesn't exist
-                    if self.sender.is_none() && !created {
+                    if self.sender.is_none() && !self.socket_created {
                         let  (tx, rx) = channel();
-                        created = true;
+                        self.socket_created = true;
 
 
                         tokio::spawn(async move {
@@ -465,18 +469,20 @@ impl RustreamApp {
                             let _ = tx.send(Arc::new(sender));
                         });
                         
+                        self.sender_rx = Some(rx);   
+                    }
 
-                        // Check if we have a pending sender initialization
-                        if let Some(mut rx) = self.sender_rx.take() {
-                            // Try to receive the sender
-                            if let Ok(sender) = rx.try_recv() {
-                                self.sender = Some(sender);
-                            }
-                        } else {
+                    // Check if we have a pending sender initialization
+                    if let Some(mut rx) = self.sender_rx.take() {
+                        // Try to receive the sender
+                        if let Ok(sender) = rx.try_recv() {
+                            self.sender = Some(sender);
+                        }
+                        else {
                             // Put the receiver back if we haven't received yet
                             self.sender_rx = Some(rx);
                         }
-                    }
+                    } 
 
                     // Send frame if we have a sender
                     if let Some(sender) = &self.sender {
@@ -542,9 +548,10 @@ impl RustreamApp {
         ui.heading("Receiver Mode");
         ui.vertical_centered(|ui| {
             ui.label("Enter the Sender's IP Address");
+            ui.add_space(10.0);
+
             if ui
                 .text_edit_singleline(&mut self.address_text)
-                .on_disabled_hover_text("NOT IMPLEMENTED")
                 .lost_focus()
             {
                 ui.label(format!("Address:{}", self.address_text));
@@ -558,21 +565,22 @@ impl RustreamApp {
             if ui.add_enabled(address_not_empty, egui::Button::new("Connect")).clicked(){
 
                 //check if inserted address is valid
-                if !self.address_text.parse::<SocketAddr>().is_ok(){   //Ipv4Addr
+                if !self.address_text.parse::<Ipv4Addr>().is_ok(){   // SocketAddr
                     ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                    //come faccio a farla comparire per più tempo?? scompare in un secondo
                 }
                 else{
 
                     let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
-                    let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
-                    addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
+                    //let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
+                    //addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
 
                     let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
                         addr_vec[0].parse::<u8>().unwrap(), 
                         addr_vec[1].parse::<u8>().unwrap(), 
                         addr_vec[2].parse::<u8>().unwrap(), 
                         addr_vec[3].parse::<u8>().unwrap())), 
-                        port.parse::<u16>().unwrap());
+                        PORT);  //port.parse::<u16>().unwrap()
                     
                     tokio::spawn(async move {
                         let socket = connect_to_sender(caster_addr).await;
