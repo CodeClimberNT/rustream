@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 use egui::{
     CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
-    TextureHandle, TopBottomPanel, Window,
+    TextureHandle, TopBottomPanel, Window, Stroke, Ui, 
 };
 
 use log::debug;
@@ -487,9 +487,7 @@ impl RustreamApp {
                     // Send frame if we have a sender
                     if let Some(sender) = &self.sender {
                         let sender_clone = sender.clone();
-                        
                         tokio::spawn(async move {
-                            
                             if let Err(e) = start_streaming(sender_clone, screen_clone).await {
                                 eprintln!("Error sending frame: {}", e);
                             }
@@ -569,7 +567,7 @@ impl RustreamApp {
                     ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
                     //come faccio a farla comparire per più tempo?? scompare in un secondo
                 }
-                else{
+                else {
 
                     let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
                     //let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
@@ -582,20 +580,82 @@ impl RustreamApp {
                         addr_vec[3].parse::<u8>().unwrap())), 
                         PORT);  //port.parse::<u16>().unwrap()
                     
+                    let  (tx, mut rx) = channel();
+                    
                     tokio::spawn(async move {
                         let socket = connect_to_sender(caster_addr).await;
                         match socket {
                             Ok(socket) => {
                                 println!("Connected to Sender");
-                                if let Err(e) = recv_data(caster_addr, socket).await {
-                                    eprintln!("Failed to receive data: {}", e);
+
+                                match recv_data(caster_addr, socket).await {
+                                    Ok(frame) => {
+                                        let _ = tx.send(frame);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to receive data: {}", e);
+                                    }
                                 }
+                                /*if let Err(e) = recv_data(caster_addr, socket).await {
+                                    eprintln!("Failed to receive data: {}", e);
+                                }*/
                             }
                             Err(_) => {
                                 println!("No data received");
                             }
                         }
                     });
+
+                    match rx.try_recv() {
+                        Ok(frame) => {
+                            println!("Frame received from channel");
+                            
+                            /*let image: ColorImage = if let Some(area) = self.capture_area {
+                                // Apply cropping if we have a capture area
+                                if let Some(cropped) =
+                                    frame
+                                        .clone()
+                                        .view(area.x, area.y, area.width, area.height)
+                                {
+                                    egui::ColorImage::from_rgba_unmultiplied(
+                                        [cropped.width as usize, cropped.height as usize],
+                                        &cropped.rgba_data, // Changed from frame_data to rgba_data
+                                    )
+                                } else {
+                                    // Fallback to full image if crop parameters are invalid
+                                    egui::ColorImage::from_rgba_unmultiplied(
+                                        [frame.width as usize, frame.height as usize],
+                                        &frame.rgba_data, // Changed from frame_data to rgba_data
+                                    )
+                                }
+                            } else {
+                                // No crop area selected, show full image
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [frame.width as usize, frame.height as usize],
+                                    &screen_image.rgba_data, // Changed from frame_data to rgba_data
+                                )
+                            };
+
+                            // Update texture
+                            if let Some(ref mut texture) = self.display_texture {
+                                texture.set(image, egui::TextureOptions::default());
+                            } else {
+                                self.display_texture = Some(ctx.load_texture(
+                                    "display_texture",
+                                    image,
+                                    egui::TextureOptions::default(),
+                                ));
+                            }
+
+                            let texture = self
+                                .display_texture
+                                .as_ref()
+                                .unwrap_or(self.textures.get("error").unwrap());
+                            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+                            */
+                    },
+                        Err(_) => println!("the sender dropped"),
+                    }
                 }
             }
         });

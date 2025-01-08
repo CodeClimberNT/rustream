@@ -44,14 +44,14 @@ impl CapturedFrame {
         })
     }
 
-    pub fn encode_to_h264(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub fn encode_to_h265(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut ffmpeg = Command::new("ffmpeg")
             .args([
                 "-f", "rawvideo", // input is raw video
                 "-pixel_format", "rgba",
                 "-video_size", &format!("{}x{}", self.width, self.height),
                 "-i", "-", // input from stdin
-                "-c:v", "libx264", // Codec H.264
+                "-c:v", "libx265", // Codec H.265
                 "-preset", "ultrafast",
                 "-f", "rawvideo", // output raw
                 "-", // output to stdout
