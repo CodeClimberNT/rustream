@@ -39,6 +39,7 @@ pub struct RustreamApp {
     sender: Option<Arc<Sender>>,
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
     socket_created: bool,
+    frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
 }
 
 #[derive(Default, Debug)]
@@ -104,6 +105,7 @@ impl RustreamApp {
             sender_rx: None,
             streaming_active: false,
             socket_created: false,
+            frame_rx: None,
             ..Default::default()
         }
     }
@@ -122,6 +124,7 @@ impl RustreamApp {
         self.sender = None;
         self.socket_created = false;
         self.streaming_active = false;
+        self.frame_rx = None;
     }
 
     fn set_page(&mut self, page: PageView) {
@@ -376,7 +379,9 @@ impl RustreamApp {
                 }).clicked() {
                     self.streaming_active = !self.streaming_active; // Toggle streaming
                     if !self.streaming_active {
+                        //se stoppo e riprendo lo streaming, mi dà errore: AddrInUse, message: "Di norma è consentito un solo utilizzo di ogni indirizzo di socket (protocollo/indirizzo di rete/porta)
                         self.sender = None; // Clear sender when stopping streaming
+                        self.socket_created = false;
                     }
                 }
 
@@ -541,44 +546,32 @@ impl RustreamApp {
         });
     }
 
-    pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui) {
+    pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         //ui.disable();
         ui.heading("Receiver Mode");
         ui.vertical_centered(|ui| {
             ui.label("Enter the Sender's IP Address");
             ui.add_space(10.0);
 
-            if ui
-                .text_edit_singleline(&mut self.address_text)
-                .lost_focus()
-            {
-                ui.label(format!("Address:{}", self.address_text));
-                debug!("Address: {}", self.address_text);
-            }
-
+            ui.text_edit_singleline(&mut self.address_text);
             ui.add_space(20.0);
 
-            let address_not_empty = !self.address_text.trim().is_empty();
-
-            if ui.add_enabled(address_not_empty, egui::Button::new("Connect")).clicked(){
+            if ui.add_enabled(!self.address_text.trim().is_empty(), egui::Button::new("Connect")).clicked(){
 
                 //check if inserted address is valid
-                if !self.address_text.parse::<Ipv4Addr>().is_ok(){   // SocketAddr
-                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                    //come faccio a farla comparire per più tempo?? scompare in un secondo
-                }
-                else {
-
-                    let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
+                
+                if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT); 
+                    //let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
                     //let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
                     //addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
 
-                    let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
+                    /*let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
                         addr_vec[0].parse::<u8>().unwrap(), 
                         addr_vec[1].parse::<u8>().unwrap(), 
                         addr_vec[2].parse::<u8>().unwrap(), 
                         addr_vec[3].parse::<u8>().unwrap())), 
-                        PORT);  //port.parse::<u16>().unwrap()
+                        PORT);  //port.parse::<u16>().unwrap()*/
                     
                     let  (tx, mut rx) = channel();
                     
@@ -588,7 +581,7 @@ impl RustreamApp {
                             Ok(socket) => {
                                 println!("Connected to Sender");
 
-                                match recv_data(caster_addr, socket).await {
+                                match recv_data(socket).await {
                                     Ok(frame) => {
                                         let _ = tx.send(frame);
                                     }
@@ -657,15 +650,90 @@ impl RustreamApp {
                         Err(_) => println!("the sender dropped"),
                     }
                 }
+                else {
+                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                    //come faccio a farla comparire per più tempo?? scompare in un secondo
+                }
+                
+                //check if inserted address is valid
+                /*if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);    
+                    
+                    let (tx, rx) = channel();
+                    self.frame_rx = Some(rx);
+
+                    //let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
+                    ///let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
+                    ///addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
+
+                    /*let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
+                        addr_vec[0].parse::<u8>().unwrap(), 
+                        addr_vec[1].parse::<u8>().unwrap(), 
+                        addr_vec[2].parse::<u8>().unwrap(), 
+                        addr_vec[3].parse::<u8>().unwrap())), 
+                        PORT);  //port.parse::<u16>().unwrap()*/
+                    
+                    //let  (tx, mut rx) = channel();
+                    
+                    tokio::spawn(async move {
+                        let socket = connect_to_sender(caster_addr).await;
+                        match socket {
+                            Ok(socket) => {
+                                println!("Connected to Sender");
+
+                                match recv_data(socket).await {
+                                    Ok(frame) => {
+                                        println!("Received data");
+                                        //let _ = tx.send(frame);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to receive data: {}", e);
+                                    }
+                                }
+                                /*if let Err(e) = recv_data(caster_addr, socket).await {
+                                    eprintln!("Failed to receive data: {}", e);
+                                }*/
+                            }
+                            Err(_) => {
+                                println!("No data received");
+                            }
+                        }
+                    });
+                } 
+                else {
+                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                }*/    
             }
-        });
-
-        
-
             
-        
-            //.on_disabled_hover_text("NOT IMPLEMENTED")
-            //.on_hover_cursor(egui::CursorIcon::NotAllowed);
+            /*if let Some(rx) = &mut self.frame_rx {
+                if let Ok(frame) = rx.try_recv() {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [frame.width as usize, frame.height as usize], 
+                        &frame.rgba_data
+                    );
+                    println!("image created");
+                        
+                        
+                    // Update texture
+                    if let Some(ref mut texture) = self.display_texture {
+                        texture.set(image, egui::TextureOptions::default());
+                    } else {
+                        self.display_texture = Some(ctx.load_texture(
+                            "display_texture",
+                            image,
+                            egui::TextureOptions::default(),
+                        ));
+                    }       
+                }                    
+            }
+
+            let texture = self
+                .display_texture
+                .as_ref()
+                .unwrap_or(self.textures.get("error").unwrap());
+            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+            */            
+        });
     }
 
     /// Add a texture to the texture map
@@ -763,7 +831,7 @@ impl eframe::App for RustreamApp {
 
             PageView::Caster => self.render_caster_page(ui, ctx, frame),
 
-            PageView::Receiver => self.render_receiver_mode(ui),
+            PageView::Receiver => self.render_receiver_mode(ui, ctx),
         });
     }
 }

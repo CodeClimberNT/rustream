@@ -63,6 +63,16 @@ impl Sender {
                         }
                         println!("New receiver connected: {}", peer_addr);
                     }
+                    
+                    /*Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                        eprintln!("Connection reset by peer: {}", e);
+                        // Handle connection reset, possibly retry connection
+                        /*let buffer = "TRY_RECONNECTION".as_bytes();
+                        if let Err(_)  = socket.try_send(buffer) {
+                            //Ok(_) => Ok(socket), 
+                           eprintln!("Failed to reconnect to receiver");
+                        }*/
+                    },*/
                     Err(e) => eprintln!("Error receiving connection: {}", e),
                 }
             }
@@ -71,14 +81,15 @@ impl Sender {
 
     pub async fn send_data(&self, frame: CapturedFrame, frame_id: Arc<Mutex<u32>>) -> Result<(), Box<dyn std::error::Error>> {
     
-        let encoded_frame= frame.encode_to_h265()?;
-        println!("Frame encoded to h265");
         let receivers = self.receivers.lock().await;
-        
         if receivers.is_empty() {
             println!("No receivers connected");
             return Ok(());  // Return early if no receivers
         }
+        
+        let encoded_frame= frame.encode_to_h265()?;
+        println!("Frame encoded to h265");     
+        
         //loop {
 
         let mut fid = frame_id.lock().await;
@@ -163,7 +174,7 @@ pub async fn connect_to_sender(sender_addr: SocketAddr) -> Result<UdpSocket, Box
     }
 }
 
-pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>{
+pub async fn recv_data(socket: UdpSocket) -> Result<CapturedFrame, Box<dyn std::error::Error + Send + Sync>>{
     
     
     //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
@@ -187,11 +198,14 @@ pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<Vec
 
                 let total_chunks = u16::from_ne_bytes(buf[2..4].try_into().unwrap());
 
-                //Discard previous frame if a new frame_id arrives before the previous last chunk
+                //Frame id changed
                 if frame_id != fid { 
-                    frame_chunks.clear();
-                    received_chunks.clear();
-                    println!("Wrong frame id: {:?}, previous frame discarded", frame_id);
+                    if !frame_chunks.is_empty() { //new frame while previous chunks are not all received, otherwise frame_chunks would have been cleared
+                        frame_chunks.clear();
+                        received_chunks.clear();
+                        println!("Wrong frame id: {:?}, previous frame discarded", frame_id);
+                    }
+                    
                     fid = frame_id;
                     
                 }
@@ -221,11 +235,9 @@ pub async fn recv_data(sender_addr: SocketAddr, socket: UdpSocket) -> Result<Vec
                         }?;
                     }
                    
-
-                // Clear frame_chunks and received_chunks for the next frame
-                frame_chunks.clear();
-                received_chunks.clear();    
-                //decodificare da h265
+                    // Clear frame_chunks and received_chunks for the next frame
+                    frame_chunks.clear();
+                    received_chunks.clear();    
                 }  
             }, 
             Err(ref e) if e.kind() == WouldBlock => {
