@@ -157,8 +157,8 @@ pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Resul
 pub struct Receiver {
     pub socket: UdpSocket,  //Arc<UdpSocket>
     pub caster: SocketAddr, //Arc<Mutex<SocketAddr>>,
-    pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
-    started_receiving: bool,
+    //pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
+    //started_receiving: bool,
 }
 
 impl Receiver {
@@ -179,8 +179,8 @@ impl Receiver {
         Self { 
             socket: sock, //Arc::new(sock),             
             caster: caster, //Arc::new(Mutex::new(caster)),
-            frames: Arc::new(Mutex::new(VecDeque::new())),
-            started_receiving: false,
+            //frames: Arc::new(Mutex::new(VecDeque::new())),
+            //started_receiving: false,
         }
     }
 
@@ -280,10 +280,10 @@ impl Receiver {
 }
 
 pub async fn start_receiving(receiver: Arc<Mutex<Receiver>>, connected: bool) -> Option<CapturedFrame> {
-    println!("Inside start_receiving");
+    //println!("Inside start_receiving");
     { //scope to release the lock
         let mut recv = receiver.lock().await;
-        println!("Receiver lock acquired");
+        //println!("Receiver lock acquired");
         //if receiver changed caster address
         if !connected {
             println!("Connecting to the new sender");
@@ -298,9 +298,8 @@ pub async fn start_receiving(receiver: Arc<Mutex<Receiver>>, connected: bool) ->
 
             match recv.recv_data().await{ //recv data deve diventare un thread?
                 Ok(frame) => {
-                    println!("Frame received from recv_data");
-                    //let mut frame_vec = recv.frames.lock().await;
-                    
+                    //println!("Frame received from recv_data");
+                    //let mut frame_vec = recv.frames.lock().await;                    
                     //frame_vec.push_back(frame);
                     //println!("Frame pushed in frames");
                     return Some(frame);
