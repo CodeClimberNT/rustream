@@ -46,7 +46,7 @@ pub struct RustreamApp {
     last_frame_time: Option<std::time::Instant>,
     frame_times: std::collections::VecDeque<std::time::Duration>,
     current_fps: f32,
-    received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
+    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
     frame_ready: bool,
 }
 
@@ -771,7 +771,7 @@ impl RustreamApp {
                     self.frame_rx = Some(rx);
 
                     let rcv_frames = self.received_frames.clone();
-                    
+                    let rcv_frames1 = self.received_frames.clone();
 
                     if let Some(caster_addr) = self.caster_addr {
                     
@@ -779,21 +779,28 @@ impl RustreamApp {
                             
                             let receiver_clone2 = Arc::clone(&receiver_clone);
                             let mut receiver = receiver_clone.lock().await;
-                            let frame;
-                            if receiver.caster != caster_addr {
+                            //let frame;
+                            
+                            let rx = receiver.frame_rx.take();
+                            
+                            //caster address changed, stop previous streaming and start the new one
+                            if receiver.caster != caster_addr { 
                                 receiver.caster = caster_addr;
                                 drop(receiver);
                                 println!("Caster address changed, reconnecting to new sender");
                                 //connect the socket to the new address and start receiving
-                                frame = start_receiving(receiver_clone2, false).await;
-                            } else {
+                                start_receiving(rcv_frames1, receiver_clone2, false).await;
+                              
+                              //start receiving only if it's the first time 
+                            } else if !receiver.started_receiving { 
                                 //drop the lock before starting the receiving task
                                 drop(receiver);
                                 //println!("Receiving from the same sender");
-                                frame = start_receiving(receiver_clone2, true).await;
+                                start_receiving(rcv_frames1, receiver_clone2, true).await;
+                                
                             }
-                            //println!("After start_receiving completed");
-                            if let Some(frame) = frame {
+                            println!("After start_receiving completed");
+                            /*if let Some(frame) = frame {
                                 println!("Frame received from start_receiving");
                                 let mut frames = rcv_frames.lock().unwrap();
                                 println!("Frame queue length: {}", frames.len());
@@ -805,7 +812,7 @@ impl RustreamApp {
                                     Ok(_) => println!("🔍 Frame successfully sent to channel"),
                                     Err(_) => println!("❌ Failed to send frame to channel"),
                                 }*/
-                            }
+                            }*/
                             /*let rcv = rcv_clone.lock().await;
                             println!("last Lock on receiver acquired");
                             let mut frame_vec = rcv.frames.lock().await; 
@@ -824,54 +831,56 @@ impl RustreamApp {
                             let frame = { //in this way the lock is released immediately
                                 let mut frames = self.received_frames.lock().unwrap();
                                 //println!("Frame queue lock 2 acquired");
+                                //println!("Frame queue size before pop: {}", frames.len());
                                 frames.pop_front()
                             };
                             //let mut frames = self.received_frames.lock().unwrap();
                             
                                 if let Some(frame) = frame {
-                                //self.frame_rx = None;
-                                //println!("Frame received from mutex");
-                                let image = egui::ColorImage::from_rgba_unmultiplied(
-                                    [frame.width as usize, frame.height as usize], 
-                                    &frame.rgba_data
-                                );
-                                println!("image created");
+                                    println!("Frame popped from mutex");
+                                    //self.frame_rx = None;
+                                    //println!("Frame received from mutex");
+                                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                                        [frame.width as usize, frame.height as usize], 
+                                        &frame.rgba_data
+                                    );
+                                    println!("image created");
                                     
-                                // Update FPS counter
-                                let now = std::time::Instant::now();
-                                if let Some(last_frame_time) = self.last_frame_time {
-                                    let frame_time = now.duration_since(last_frame_time);
-                                    self.frame_times.push_back(frame_time);
-                                    
-                                    // Keep only last 60 frame times for moving average
-                                    if self.frame_times.len() > 60 {
-                                        self.frame_times.pop_front();
+                                    // Update FPS counter
+                                    let now = std::time::Instant::now();
+                                    if let Some(last_frame_time) = self.last_frame_time {
+                                        let frame_time = now.duration_since(last_frame_time);
+                                        self.frame_times.push_back(frame_time);
+                                        
+                                        // Keep only last 60 frame times for moving average
+                                        if self.frame_times.len() > 60 {
+                                            self.frame_times.pop_front();
+                                        }
+                                        
+                                        // Calculate average FPS
+                                        if !self.frame_times.is_empty() {
+                                            let avg_frame_time: std::time::Duration = self.frame_times.iter().sum::<std::time::Duration>() 
+                                                / self.frame_times.len() as u32;
+                                            self.current_fps = 1.0 / avg_frame_time.as_secs_f32();
+                                        }
                                     }
-                                    
-                                    // Calculate average FPS
-                                    if !self.frame_times.is_empty() {
-                                        let avg_frame_time: std::time::Duration = self.frame_times.iter().sum::<std::time::Duration>() 
-                                            / self.frame_times.len() as u32;
-                                        self.current_fps = 1.0 / avg_frame_time.as_secs_f32();
-                                    }
-                                }
-                                self.last_frame_time = Some(now);
+                                    self.last_frame_time = Some(now);
 
-                                // Update texture
-                                if let Some(ref mut texture) = self.display_texture {
-                                    texture.set(image, egui::TextureOptions::default());
-                                    println!("texture updated");
-                                } else {
-                                    self.display_texture = Some(ctx.load_texture(
-                                        "display_texture",
-                                        image,
-                                        egui::TextureOptions::default(),
-                                    ));
-                                    println!("texture loaded");
-                                }
-                                
-                            }   
-                            ctx.request_repaint();                 
+                                    // Update texture
+                                    if let Some(ref mut texture) = self.display_texture {
+                                        texture.set(image, egui::TextureOptions::default());
+                                        println!("texture updated");
+                                    } else {
+                                        self.display_texture = Some(ctx.load_texture(
+                                            "display_texture",
+                                            image,
+                                            egui::TextureOptions::default(),
+                                        ));
+                                        println!("texture loaded");
+                                    }
+                                    
+                                }   
+                                ctx.request_repaint();                 
                         //}
                     } 
 

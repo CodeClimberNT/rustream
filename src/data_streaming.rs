@@ -1,21 +1,22 @@
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 use std::io::ErrorKind::WouldBlock;
-use std::sync::Arc;
+use std::sync::{Arc};
 use crate::frame_grabber::{CapturedFrame};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc, Notify};
 use std::mem;
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, ChildStdout};
 use std::time::Duration;
 use std::collections::VecDeque;
+use std::env;
 
 pub const PORT: u16 = 56123;
 const MAX_DATAGRAM_SIZE: usize = 65507; //1472
 const SEQ_NUM_SIZE: usize = size_of::<u16>(); // Size of sequence number, 2
 const FRAME_ID_SIZE: usize = size_of::<u32>(); // Size of frame_id, 4
 
-//#[derive(Clone)]      
+     
 pub struct Sender {
     socket: Arc<UdpSocket>,
     receivers: Arc<Mutex<Vec<SocketAddr>>>,
@@ -114,10 +115,12 @@ impl Sender {
                     eprintln!("Error sending to {}: {}", peer, e);
                 }
                 println!("Sent chunk {:?} to peer {}", seq_num, peer);
-                tokio::time::sleep(Duration::from_micros(100)).await;
+                //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
             }
             seq_num += 1;
+            
         }
+        drop(encoded_frame);
         Ok(())
         
     }
@@ -158,7 +161,8 @@ pub struct Receiver {
     pub socket: UdpSocket,  //Arc<UdpSocket>
     pub caster: SocketAddr, //Arc<Mutex<SocketAddr>>,
     //pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
-    //started_receiving: bool,
+    pub started_receiving: bool,
+    pub frame_rx: Option<mpsc::Receiver<CapturedFrame>>,
 }
 
 impl Receiver {
@@ -180,7 +184,8 @@ impl Receiver {
             socket: sock, //Arc::new(sock),             
             caster: caster, //Arc::new(Mutex::new(caster)),
             //frames: Arc::new(Mutex::new(VecDeque::new())),
-            //started_receiving: false,
+            started_receiving: false,
+            frame_rx: None,
         }
     }
 
@@ -199,27 +204,27 @@ impl Receiver {
         }
     }
 
-    pub async fn recv_data(&mut self) -> Result<CapturedFrame, Box<dyn std::error::Error + Send + Sync>>{
-    
+    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
     
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
         let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
         let mut frame: Vec<u8> = Vec::new();
         let mut fid:u32 = 1;
         let mut received_chunks = std::collections::HashSet::new();
+        
     
-        loop {
+        while self.started_receiving { //implementare in app pulsante stop che mette started_receiving a false
     
-            self.socket.readable().await?;
+            //self.socket.readable().await?;
             let mut buf =  vec![0; MAX_DATAGRAM_SIZE];
     
-            match self.socket.try_recv_from(&mut buf) {
+            match self.socket.recv_from(&mut buf).await {
                 Ok((len, _)) => {
                     
                     let frame_id = u32::from_ne_bytes(buf[4..8].try_into().unwrap());
-                    println!("Received Frame {:?}", frame_id);
+
                     let seq_num = u16::from_ne_bytes(buf[0..2].try_into().unwrap());
-                    println!("Received chunk {:?} from sender:", seq_num);
+                    println!("Received Frame {:?}, chunk {:?}", frame_id, seq_num);
     
                     let total_chunks = u16::from_ne_bytes(buf[2..4].try_into().unwrap());
     
@@ -229,6 +234,7 @@ impl Receiver {
                         if !frame_chunks.is_empty() { //new frame while previous chunks are not all received, otherwise frame_chunks would have been cleared
                             frame_chunks.clear();
                             received_chunks.clear();
+                            frame.clear();
                             println!("Wrong frame id: {:?}, previous frame discarded", frame_id);
                         }
                         
@@ -250,24 +256,25 @@ impl Receiver {
                             for (_, ref chunk) in &frame_chunks {
                                 frame.append(&mut chunk.clone());
                             }
-    
-                            let decoded_frame = decode_from_h265_to_rgba(frame.clone());
-                            //return decoded_frame;
-                            return match decoded_frame {
-                                Ok(frame) => {
-                                    println!("Frame decoded in recv_data");
-                                    Ok(frame)
-                                },
-                                Err(e) =>  {
-                                    eprintln!("Error decoding frame: {}", e);
-                                    Err(e)
-                                }
-                            };
+                            
+                            let encoded_frame = frame.clone();
+                            if let Err(e) = tx.send(encoded_frame).await {
+                                eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
+                            }
+                            println!("Frame sent to process_frame");
+                           
+                            
+                            //let frames = frames_vec.clone();
+                            /*tokio::spawn(async move{
+                                process_frame(enc_frames, frames).await;
+                            });*/
+                            //return Ok(frame);
                         }
                        
                         // Clear frame_chunks and received_chunks for the next frame
                         frame_chunks.clear();
-                        received_chunks.clear();    
+                        received_chunks.clear();
+                        frame.clear();    
                     }  
                 }, 
                 Err(ref e) if e.kind() == WouldBlock => {
@@ -276,56 +283,199 @@ impl Receiver {
                 Err(e) => println!("Error in receiving data {:?}", e), //dà WouldBlock, non trova dati da leggere
             }
         }
+        Ok(())  //when not receiving return
     }
+
+    
 }
 
-pub async fn start_receiving(receiver: Arc<Mutex<Receiver>>, connected: bool) -> Option<CapturedFrame> {
-    //println!("Inside start_receiving");
-    { //scope to release the lock
-        let mut recv = receiver.lock().await;
-        //println!("Receiver lock acquired");
-        //if receiver changed caster address
-        if !connected {
-            println!("Connecting to the new sender");
-            if let Err(e) = recv.connect_to_sender().await{
-                println!("Error connecting to sender: {}", e);
-                
-            };
-        }
-        //launch recv_data thread only when starting receiving a stream (vedere come implementare la cosa, i thread danno problemi per async)
-        //if !recv.started_receiving {
-            //recv.started_receiving = true;
-
-            match recv.recv_data().await{ //recv data deve diventare un thread?
-                Ok(frame) => {
-                    //println!("Frame received from recv_data");
-                    //let mut frame_vec = recv.frames.lock().await;                    
-                    //frame_vec.push_back(frame);
-                    //println!("Frame pushed in frames");
-                    return Some(frame);
-                },
-                Err(e) => {
-                    println!("Error receiving frame: {}", e);
-                    return None;},
-            }
-        /*}
-        else {
-            return None;
-        }*/
+async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {  // mut rx: mpsc::Receiver<Vec<u8>>
         
-    }
+   // while let Some(frame) = rx.recv().await { //while self.started_receiving
+        //let mut frames = enc_frames.lock().await;
+        //if let Some(frame) = frames.pop_front() {
+            println!("Frame received in process_frame");
+            //drop(frames);
+            let decoded_frame = decode_from_h265_to_rgba(frame);
+            match decoded_frame {
+                Ok(frame) => {
+                    println!("Frame received in process_frame");
+                    let mut frames = frames_vec.lock().unwrap();
+                    frames.push_back(frame);
+                    println!("Frame pushed to frames_vec");
+                },
+                Err(e) =>  {
+                    eprintln!("Error decoding frame: {}", e);
+                }
+            };
+
+            //tokio::time::sleep(Duration::from_millis(5)).await;
+        //}
+    //}
+    /*let decoded_frame = decode_from_h265_to_rgba(frame);
+    //return decoded_frame;
+    match decoded_frame {
+        Ok(frame) => {
+            println!("Frame received in process_frame");
+            let mut frames = frames_vec.lock().unwrap();
+            frames.push_back(frame);
+            println!("Frame pushed to frames_vec");
+
+            /*if tx.is_closed() {
+                eprintln!("❌ Error: Channel is closed, cannot send frame");
+                return;
+            }
+            if let Err(e) = tx.send(frame).await {
+                eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
+            } */
+        },
+        Err(e) =>  {
+            eprintln!("Error decoding frame: {}", e);
+        }
+     };*/
 }
 
+pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, receiver: Arc<Mutex<Receiver>>, connected: bool) {
+    //println!("Inside start_receiving");
+   
+    let mut recv = receiver.lock().await;
+     println!("Receiver lock acquired");
+
+    //if receiver changed caster address
+    if !connected {
+        println!("Connecting to the new sender");
+        if let Err(e) = recv.connect_to_sender().await{
+            println!("Error connecting to sender: {}", e);
+            
+        };
+    }
 
 
+    /*if channel_rx.is_none() { //if rx has not been initialized before
+        let (tx, mut rx) = mpsc::channel::<CapturedFrame>(100);
+        let tx_clone = tx.clone();
+        recv.frame_rx = Some(rx);
+        recv.frame_tx = Some(tx);
+        //channel_rx = Some(rx);
+        drop(recv); //release the lock
+    }
 
+    let recv_clone = receiver.clone();
+    //wait to receive the decoded frame
+    let handle = tokio::spawn(async move {
+        println!("Waiting for processed frame");
+        let mut recv = recv_clone.lock().await;
+        if let Some(ref mut rx) = recv.frame_rx {
+             println!("Receiver lock acquired, waiting for processed frame");
+            if let Some(frame) = rx.recv().await { //release the lock
+                println!("Received processed frame");
+                drop(recv);
+                Some(frame)
+            } else {
+                println!("Error receiving frame from processing (channel closed)");
+                drop(recv);
+                None
+            }
+            
+        } else {
+            drop(recv);
+            println!("No rx");
+            None
+        }
+        
+    });*/
+    
+        
+    //let recv_clone = receiver.clone();
+    if !recv.started_receiving {
+        recv.started_receiving = true;
+        drop(recv);
+
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
+
+        let recv_clone = receiver.clone();
+        tokio::spawn(async move {
+            //scope to release the lock
+            let mut recv = recv_clone.lock().await;
+            
+            //let mut ready = false;
+            //let rc = receiver.clone();  
+        
+            //launch recv_data thread only when starting receiving a stream (vedere come implementare la cosa, i thread danno problemi per async)
+            //if !recv.started_receiving {
+                //recv.started_receiving = true;
+                //println!("inside is !started receiving");
+                
+                //drop(recv); //release the lock
+       
+                //tokio::spawn(async move { //let handle =
+                    //println!("inside tokio spawn");
+                    //let mut recv = rc.lock().await;
+    
+                  
+                    println!("Calling recv_data");
+                    //if let Some(tx) = recv.frame_tx.clone() {
+                        if let Err(e) = recv.recv_data(tx).await{
+                            println!("Error receiving frame: {}", e);
+                        }
+                        drop(recv);
+                    
+                    /*match recv.recv_data().await{ //recv data deve diventare un thread?
+                        Ok(frame) => {
+                            //println!("Frame received from recv_data");                    
+                            return Some(frame);
+                        },
+                        Err(e) => {
+                            println!("Error receiving frame: {}", e);
+                            return None;
+                        }
+                    }*/
+                //});
+                    //}
+            //}
+        });
+        
+        
+        while let Some(frame) = rx.recv().await {
+            let frames_vec1 = frames_vec.clone();
+            tokio::spawn(async move {
+        
+                println!("Calling process_frame");
+                process_frame(frames_vec1, frame).await;
+                // frames_vec is the vector of frames to share with ui
+                
+            });   
+        }
+    } 
+}
 
 fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std::error::Error + Send + Sync>>{
     
+    println!("Dimension of encoded frame: {}", frame.len());
     
+    let platform = env::consts::OS; //detect OS
+
+    let (gpu_acceleration, decoder) = match platform {
+        "linux" => 
+        // On Linux, prefer VAAPI (works with Intel/AMD)
+        (["-hwaccel", "vaapi"], ["-c:v", "hevc_vaapi"]),
+
+        "windows" => 
+         // On Windows, use CUDA/NVENC (for NVIDIA GPUs)
+         (["-hwaccel", "cuda"], ["-c:v", "hevc_cuda"]),
+
+        "macos" => 
+        // On macOS, you might rely on software decoding or choose available hardware (e.g., use VideoToolbox)
+        (["-hwaccel", "videotoolbox"], ["-c:v", "hevc_videotoolbox"]),
+
+        _ => (["", ""], ["-c:v", "hevc"]),
+    };
 
     let mut ffmpeg = Command::new("ffmpeg")
             .args([
+                //"-y",  // Overwrite output files
+                //gpu_acceleration[0], gpu_acceleration[1],
+                //decoder[0], decoder[1],
                 "-f", "hevc",   // input format is H.265
                 "-i", "pipe:0", // input from stdin
                 "-c:v", "rawvideo",
@@ -339,10 +489,11 @@ fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()) // null() Ignora errori di ffmpeg per semplicità
             .spawn()?;
-
+        
         // write encoded frame in stdin
         if let Some(stdin) = ffmpeg.stdin.as_mut() {
             stdin.write_all(&frame)?;
+            //stdin.flush()?;  // Ensure all data is written
         } else {
             return Err("Failed to open stdin for ffmpeg".into());
         }
@@ -357,6 +508,7 @@ fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std
         println!("Frame decoded to rgba");
         
         let rgba_data = output.stdout; 
+        println!("Decoded RGBA size: {}", rgba_data.len());
         
         let (width, height) = get_h265_dimensions(frame.clone())?;
         
