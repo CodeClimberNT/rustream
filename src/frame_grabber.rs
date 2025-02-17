@@ -1,4 +1,4 @@
-use crate::{audio_capture::AudioCapture};
+use crate::audio_capture::AudioCapture;
 use crate::config::Config;
 use image::{GenericImageView, ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 use scrap::{Capturer, Display};
 use std::sync::mpsc;
-use std::env;
+use std::{env, thread};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CapturedFrame {
@@ -154,6 +154,11 @@ impl FrameGrabber {
     }
 
     pub fn capture_frame(&mut self) -> Option<CapturedFrame> {
+        /*thread::spawn(|| {
+            loop {
+
+            }
+        });*/
         if self.capturer.is_none() {
             let monitor =
                 get_monitor_from_index(self.config.lock().unwrap().capture.selected_monitor)

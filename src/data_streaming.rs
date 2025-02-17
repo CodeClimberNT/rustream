@@ -1,12 +1,13 @@
 use std::net::SocketAddr;
+use std::str::from_utf8;
 use tokio::net::UdpSocket;
 use std::io::ErrorKind::WouldBlock;
-use std::sync::{Arc};
-use crate::frame_grabber::{CapturedFrame};
+use std::sync::Arc;
+use crate::frame_grabber::CapturedFrame;
 use tokio::sync::{Mutex, mpsc, Notify};
 use std::mem;
 use std::io::Write;
-use std::process::{Command, Stdio, ChildStdout};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::env;
@@ -56,15 +57,28 @@ impl Sender {
         tokio::spawn(async move {
             loop {
                 match socket.recv_from(&mut buf).await {
-                    Ok((_, peer_addr)) => {
-                        println!("Received connection request from: {}", &peer_addr);
-                        let mut receivers = receivers.lock().await;
-                        if !receivers.contains(&peer_addr) {
-                            receivers.push(peer_addr);
+                    Ok((_, peer_addr)) => {                        
+                        if let Ok(message) = from_utf8(&buf) {                        
                             
-                        }
-                        println!("New receiver connected: {}", peer_addr);
-                    }
+                            if message.trim_matches('\0') == "REQ_FRAMES" {
+                                println!("Received connection request from: {}", &peer_addr);
+                                let mut receivers = receivers.lock().await;
+                                if !receivers.contains(&peer_addr) {
+                                    receivers.push(peer_addr);
+                                    
+                                }
+                                println!("New receiver connected: {}", peer_addr);
+                            }
+                            else if message.trim_matches('\0') == "CLOSE_CONNECTION" {
+                                println!("Received close connection request from: {}", &peer_addr);
+                                let mut receivers = receivers.lock().await;
+                                if receivers.contains(&peer_addr) {
+                                    receivers.retain(|&x| x != peer_addr); // Remove the disconnected receiver
+                                    println!("Receiver {} disconnected", peer_addr);
+                                }
+                            }
+                        }  
+                    },
                     
                     /*Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                         eprintln!("Connection reset by peer: {}", e);
@@ -75,6 +89,7 @@ impl Sender {
                            eprintln!("Failed to reconnect to receiver");
                         }*/
                     },*/
+                    
                     Err(e) => eprintln!("Error receiving connection: {}", e),
                 }
             }
@@ -131,7 +146,11 @@ pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Resul
     sender.listen_for_receivers().await;
     let frame_id = sender.frame_id.clone();
     
-    sender.send_data(frame, frame_id).await
+    return match sender.send_data(frame, frame_id).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e)
+
+    }
 }
 
 /*pub async fn cast_streaming(sender: &mut Sender, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
@@ -162,7 +181,8 @@ pub struct Receiver {
     pub caster: SocketAddr, //Arc<Mutex<SocketAddr>>,
     //pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
     pub started_receiving: bool,
-    pub frame_rx: Option<mpsc::Receiver<CapturedFrame>>,
+    //pub frame_rx: Option<mpsc::Receiver<CapturedFrame>>,
+    
 }
 
 impl Receiver {
@@ -170,9 +190,9 @@ impl Receiver {
     pub async fn new(caster: SocketAddr) -> Self {  
         let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();       
         println!("Socket {} ",  sock.local_addr().unwrap());
-        let buf = "REQ_FRAME".as_bytes();
+        let buf = "REQ_FRAMES".as_bytes();
         if let Ok(_) = sock.connect(caster).await{ //connects socket to send/receive only from sender_addr
-            match sock.try_send(buf) {
+            match sock.try_send(buf) { //send datagram to caster to request the streaming
                 Ok(_) => {
                     println!("Connected to sender");
                 }, 
@@ -185,7 +205,7 @@ impl Receiver {
             caster: caster, //Arc::new(Mutex::new(caster)),
             //frames: Arc::new(Mutex::new(VecDeque::new())),
             started_receiving: false,
-            frame_rx: None,
+            //frame_rx: None,
         }
     }
 
@@ -204,86 +224,105 @@ impl Receiver {
         }
     }
 
-    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
+    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>) -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
     
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
         let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
         let mut frame: Vec<u8> = Vec::new();
         let mut fid:u32 = 1;
         let mut received_chunks = std::collections::HashSet::new();
-        
-    
-        while self.started_receiving { //implementare in app pulsante stop che mette started_receiving a false
-    
+
+        //while self.started_receiving { //implementare in app pulsante stop che mette started_receiving a false
+        loop {
             //self.socket.readable().await?;
             let mut buf =  vec![0; MAX_DATAGRAM_SIZE];
+            
+            tokio::select! {
+                _ = stop_notify.notified() => { 
+                    println!("Received stop signal, exiting recv_data"); 
+                    break; // Gracefully exit when `notify_waiters()` is called
+                }
     
-            match self.socket.recv_from(&mut buf).await {
-                Ok((len, _)) => {
-                    
-                    let frame_id = u32::from_ne_bytes(buf[4..8].try_into().unwrap());
+                res = self.socket.recv_from(&mut buf) => { // Keep listening for UDP packets
+                    match res {
+            //match self.socket.recv_from(&mut buf).await {
+                        Ok((len, _)) => {
+                            
+                            let frame_id = u32::from_ne_bytes(buf[4..8].try_into().unwrap());
 
-                    let seq_num = u16::from_ne_bytes(buf[0..2].try_into().unwrap());
-                    println!("Received Frame {:?}, chunk {:?}", frame_id, seq_num);
-    
-                    let total_chunks = u16::from_ne_bytes(buf[2..4].try_into().unwrap());
-    
-                    //Frame id changed
-                    if frame_id != fid { 
-                        //last chunk of previous frame not received
-                        if !frame_chunks.is_empty() { //new frame while previous chunks are not all received, otherwise frame_chunks would have been cleared
-                            frame_chunks.clear();
-                            received_chunks.clear();
-                            frame.clear();
-                            println!("Wrong frame id: {:?}, previous frame discarded", frame_id);
-                        }
-                        
-                        fid = frame_id;
-                        
+                            let seq_num = u16::from_ne_bytes(buf[0..2].try_into().unwrap());
+                            println!("Received Frame {:?}, chunk {:?}", frame_id, seq_num);
+            
+                            let total_chunks = u16::from_ne_bytes(buf[2..4].try_into().unwrap());
+            
+                            //Frame id changed
+                            if frame_id != fid { 
+                                //last chunk of previous frame not received
+                                if !frame_chunks.is_empty() { //new frame while previous chunks are not all received, otherwise frame_chunks would have been cleared
+                                    frame_chunks.clear();
+                                    received_chunks.clear();
+                                    frame.clear();
+                                    println!("Wrong frame id: {:?}, previous frame discarded", frame_id);
+                                }
+                                
+                                fid = frame_id;
+                                
+                            }
+                            
+                            let chunk_data = buf[8..len].to_vec();
+                            received_chunks.insert(seq_num);
+                            frame_chunks.push((seq_num, chunk_data));
+                            //println!("Frame_chunks len: {:?}", frame_chunks.len());
+                            
+                            if seq_num == total_chunks - 1 {
+                                //If all chunks of frame are received, sort chunks and decode frame
+                                if received_chunks.len() == total_chunks as usize {
+                                    frame_chunks.sort_by(|a, b| a.0.cmp(&b.0));
+                                    println!("Frame_chunks sorted, index order: {:?}", frame_chunks.iter().map(|(i, _)| i).collect::<Vec<_>>());
+            
+                                    for (_, ref chunk) in &frame_chunks {
+                                        frame.append(&mut chunk.clone());
+                                    }
+                                    
+                                    let encoded_frame = frame.clone();
+                                    if let Err(e) = tx.send(encoded_frame).await {
+                                        eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
+                                    }
+                                    //println!("Frame sent to process_frame");
+                                
+                                    
+                                    //let frames = frames_vec.clone();
+                                    /*tokio::spawn(async move{
+                                        process_frame(enc_frames, frames).await;
+                                    });*/
+                                    //return Ok(frame);
+                                }
+                            
+                                // Clear frame_chunks and received_chunks for the next frame
+                                frame_chunks.clear();
+                                received_chunks.clear();
+                                frame.clear();    
+                            }  
+                        }, 
+                        Err(ref e) if e.kind() == WouldBlock => {
+                            continue;
+                        },
+                        Err(e) => println!("Error in receiving data {:?}", e), //dà WouldBlock, non trova dati da leggere
                     }
-                    
-                    let chunk_data = buf[8..len].to_vec();
-                    received_chunks.insert(seq_num);
-                    frame_chunks.push((seq_num, chunk_data));
-                    //println!("Frame_chunks len: {:?}", frame_chunks.len());
-                    
-                    if seq_num == total_chunks - 1 {
-                        //If all chunks of frame are received, sort chunks and decode frame
-                        if received_chunks.len() == total_chunks as usize {
-                            frame_chunks.sort_by(|a, b| a.0.cmp(&b.0));
-                            println!("Frame_chunks sorted, index order: {:?}", frame_chunks.iter().map(|(i, _)| i).collect::<Vec<_>>());
-    
-                            for (_, ref chunk) in &frame_chunks {
-                                frame.append(&mut chunk.clone());
-                            }
-                            
-                            let encoded_frame = frame.clone();
-                            if let Err(e) = tx.send(encoded_frame).await {
-                                eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
-                            }
-                            println!("Frame sent to process_frame");
-                           
-                            
-                            //let frames = frames_vec.clone();
-                            /*tokio::spawn(async move{
-                                process_frame(enc_frames, frames).await;
-                            });*/
-                            //return Ok(frame);
-                        }
-                       
-                        // Clear frame_chunks and received_chunks for the next frame
-                        frame_chunks.clear();
-                        received_chunks.clear();
-                        frame.clear();    
-                    }  
-                }, 
-                Err(ref e) if e.kind() == WouldBlock => {
-                    continue;
-                },
-                Err(e) => println!("Error in receiving data {:?}", e), //dà WouldBlock, non trova dati da leggere
+                }
             }
         }
         Ok(())  //when not receiving return
+    }
+
+    pub fn stop_receiving(&self) {
+        let buf = "CLOSE_CONNECTION".as_bytes();
+        match self.socket.try_send(buf) {
+            Ok(_) => {
+                println!("Close connection request sent to sender");
+            }, 
+            Err(_) => println!("Failed to close connection"),
+        }
     }
 
     
@@ -294,12 +333,11 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
    // while let Some(frame) = rx.recv().await { //while self.started_receiving
         //let mut frames = enc_frames.lock().await;
         //if let Some(frame) = frames.pop_front() {
-            println!("Frame received in process_frame");
+            //println!("Frame received in process_frame");
             //drop(frames);
             let decoded_frame = decode_from_h265_to_rgba(frame);
             match decoded_frame {
                 Ok(frame) => {
-                    println!("Frame received in process_frame");
                     let mut frames = frames_vec.lock().unwrap();
                     frames.push_back(frame);
                     println!("Frame pushed to frames_vec");
@@ -335,20 +373,20 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
      };*/
 }
 
-pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, receiver: Arc<Mutex<Receiver>>, connected: bool) {
+pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, receiver: Arc<Mutex<Receiver>>, stop_notify: Arc<Notify>) {
     //println!("Inside start_receiving");
    
     let mut recv = receiver.lock().await;
-     println!("Receiver lock acquired");
+     //println!("Receiver lock acquired");
 
     //if receiver changed caster address
-    if !connected {
+    /*if !connected {
         println!("Connecting to the new sender");
         if let Err(e) = recv.connect_to_sender().await{
             println!("Error connecting to sender: {}", e);
             
         };
-    }
+    }*/
 
 
     /*if channel_rx.is_none() { //if rx has not been initialized before
@@ -415,9 +453,10 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
                   
                     println!("Calling recv_data");
                     //if let Some(tx) = recv.frame_tx.clone() {
-                        if let Err(e) = recv.recv_data(tx).await{
+                        if let Err(e) = recv.recv_data(tx, stop_notify).await{
                             println!("Error receiving frame: {}", e);
                         }
+                        //if recv_data never ends recv is never dropped?
                         drop(recv);
                     
                     /*match recv.recv_data().await{ //recv data deve diventare un thread?
@@ -451,7 +490,7 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
 
 fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std::error::Error + Send + Sync>>{
     
-    println!("Dimension of encoded frame: {}", frame.len());
+    //println!("Dimension of encoded frame: {}", frame.len());
     
     let platform = env::consts::OS; //detect OS
 
@@ -508,7 +547,7 @@ fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std
         println!("Frame decoded to rgba");
         
         let rgba_data = output.stdout; 
-        println!("Decoded RGBA size: {}", rgba_data.len());
+        //println!("Decoded RGBA size: {}", rgba_data.len());
         
         let (width, height) = get_h265_dimensions(frame.clone())?;
         

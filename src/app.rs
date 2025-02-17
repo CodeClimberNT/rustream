@@ -4,15 +4,17 @@ use crate::frame_grabber::{CapturedFrame, FrameGrabber};
 use crate::video_recorder::VideoRecorder;
 use crate::data_streaming::{Sender, Receiver, start_streaming, start_receiving, PORT};
 use tokio::sync::oneshot::{channel, error::TryRecvError};
+use tokio::sync::Notify;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::collections::VecDeque;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use eframe::egui;
 use egui::{
     CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText,
-    TextureHandle, TopBottomPanel, Window,
+    TextureHandle, TopBottomPanel, Window, TextStyle,
 };
 
 use log::debug;
@@ -42,12 +44,14 @@ pub struct RustreamApp {
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
     receiver_rx: Option<tokio::sync::oneshot::Receiver<Receiver>>,
     socket_created: bool,
-    frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
+    //frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
     last_frame_time: Option<std::time::Instant>,
     frame_times: std::collections::VecDeque<std::time::Duration>,
     current_fps: f32,
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
-    frame_ready: bool,
+    //frame_ready: bool,
+    pub stop_notify: Arc<Notify>,
+    is_receiving: bool,
 }
 
 #[derive(Default, Debug)]
@@ -113,14 +117,16 @@ impl RustreamApp {
             sender_rx: None,
             streaming_active: false,
             socket_created: false,
-            frame_rx: None,
+            //frame_rx: None,
             receiver: None,
             receiver_rx: None,
             last_frame_time: None,
             frame_times: std::collections::VecDeque::with_capacity(60),
             current_fps: 0.0,
             received_frames: Arc::new(Mutex::new(VecDeque::new())),
-            frame_ready: false,
+            //frame_ready: false,
+            stop_notify: Arc::new(Notify::new()),
+            is_receiving: false,
             ..Default::default()
         }
     }
@@ -139,7 +145,7 @@ impl RustreamApp {
         self.sender = None;
         self.socket_created = false;
         self.streaming_active = false;
-        self.frame_rx = None;
+        //self.frame_rx = None;
     }
 
     fn set_page(&mut self, page: PageView) {
@@ -418,6 +424,8 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
+            //modificare qui, metere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
+            //poi metto il frame catturato in un mutex e l'ui lo prenderà da lì
             
             if let Some(screen_image) = self.frame_grabber.capture_frame() {
 
@@ -562,7 +570,7 @@ impl RustreamApp {
         });
     }
 
-    pub fn render_receiver_mode(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+    pub fn render_receiver_mode(&mut self, ctx: &Context) {
 
         // Add a container for the entire window content
         egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
@@ -578,169 +586,217 @@ impl RustreamApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Receiver Mode");
             ui.vertical_centered(|ui| {
-                ui.label("Enter the Sender's IP Address");
-                ui.add_space(10.0);
 
-                //ui.vertical_centered(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_space( 150.0);
-                        ui.text_edit_singleline(&mut self.address_text);
-                        ui.add_space(20.0);
+                if !self.is_receiving {
+                    ui.label("Enter the Sender's IP Address");
+                    ui.add_space(10.0);
 
-                        if ui.add_enabled(!self.address_text.trim().is_empty(), egui::Button::new("Connect")).clicked(){
+                    let connect_button = egui::Button::new(
+                        egui::RichText::new("Connect").color(egui::Color32::WHITE).size(15.0)
+                    )
+                    .fill(egui::Color32::from_rgb(0, 200, 0))
+                    .min_size(egui::vec2(60.0, 30.0));
 
-                            //check if inserted address is valid
-                            if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
-                                let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
-                                self.caster_addr = Some(caster_addr); 
-                                
-                                
-                                //let  (tx, rx) = mpsc::sync_channel(1);
-                                
-                                
-                                // Initialize receiver if it doesn't exist
-                                if self.receiver.is_none()  {  //&& !self.socket_created
-                                    let  (tx, rx) = channel();
-                                    
-                                    //self.socket_created = true; //socket is created correctly only after the execution of async code, should i do this there??
-                                    
-                                    tokio::spawn(async move {
-                                        let receiver = Receiver::new(caster_addr).await;
+                    //ui.vertical_centered(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_space( 150.0);
+                            ui.style_mut().text_styles.insert(
+                                TextStyle::Body,
+                                FontId::new(15.0, egui::FontFamily::Proportional), // 24 logical points
+                            );
+                            ui.add_sized(
+                                egui::vec2(300.0, 30.0), // Width: 300, Height: 40
+                                egui::TextEdit::singleline(&mut self.address_text)
+                                .frame(true)
+                            );
+                            ui.add_space(20.0);
 
-                                        let _ = tx.send(receiver);
-                                    });
+                            if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button).clicked(){
 
-                                    //store rx to poll it later to see if initialization completed, since the channel sender is async
-                                    self.receiver_rx = Some(rx); 
-                                    
+                                //check if inserted address is valid
+                                if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
+                                    self.caster_addr = Some(caster_addr); 
+                            
+                                    // Initialize receiver
+                                    //if self.receiver.is_none()  {  //&& !self.socket_created
+                                        let  (tx, rx) = channel();
+                                        
+                                        tokio::spawn(async move {
+                                            let receiver = Receiver::new(caster_addr).await;
+
+                                            let _ = tx.send(receiver);
+                                        });
+
+                                        //store rx to poll it later to see if initialization completed, since the channel sender is async
+                                        self.receiver_rx = Some(rx); 
+                                        
+                                    //}
+
+                                    //let tx_clone = tx.clone();
+                                    //tokio::spawn(async move {
+                                        /*
+                                        if !self.socket_created {
+                                        }
+                                        let socket = connect_to_sender(caster_addr).await;
+                                        match socket {
+                                            Ok(socket) => {
+                                                
+                                                println!("Connected to Sender");
+
+                                                match recv_data(socket).await {
+                                                    Ok(frame) => {
+                                                        print!("Frame received from receiver");
+                                                        let _ = tx_clone.send(frame);
+                                                        drop(tx_clone);
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("Failed to receive data: {}", e);
+                                                    }
+                                                }
+                                                /*if let Err(e) = recv_data(caster_addr, socket).await {
+                                                    eprintln!("Failed to receive data: {}", e);
+                                                }*/
+                                            }
+                                            Err(e) => {
+                                                println!("No data received");
+                                                println!("{}", e);
+                                            }
+                                        }*/
+                                    //});
+
+                                    /*match rx.try_recv() { //eseguita anche se la socket non si è connessa
+                                        Ok(frame) => {
+                                            println!("Frame received from channel");
+                                            
+                                            let image: ColorImage =  egui::ColorImage::from_rgba_unmultiplied(
+                                                [frame.width as usize, frame.height as usize],
+                                                &frame.rgba_data );
+
+                                            // Update texture
+                                            if let Some(ref mut texture) = self.display_texture {
+                                                texture.set(image, egui::TextureOptions::default());
+                                            } else {
+                                                self.display_texture = Some(ctx.load_texture(
+                                                    "display_texture",
+                                                    image,
+                                                    egui::TextureOptions::default(),
+                                                ));
+                                            }
+
+                                            let texture = self
+                                                .display_texture
+                                                .as_ref()
+                                                .unwrap_or(self.textures.get("error").unwrap());
+                                            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+                                            
+                                        },
+                                        Err(_) => println!("the sender dropped or no data received"),
+                                    }*/
+                                    self.is_receiving = true;
+                                }
+                                else {
+                                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                                    //come faccio a farla comparire per più tempo?? scompare in un secondo
                                 }
 
-                                //let tx_clone = tx.clone();
-                                //tokio::spawn(async move {
-                                    /*
-                                    if !self.socket_created {
-                                    }
-                                    let socket = connect_to_sender(caster_addr).await;
-                                    match socket {
-                                        Ok(socket) => {
-                                            
-                                            println!("Connected to Sender");
-
-                                            match recv_data(socket).await {
-                                                Ok(frame) => {
-                                                    print!("Frame received from receiver");
-                                                    let _ = tx_clone.send(frame);
-                                                    drop(tx_clone);
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("Failed to receive data: {}", e);
-                                                }
-                                            }
-                                            /*if let Err(e) = recv_data(caster_addr, socket).await {
-                                                eprintln!("Failed to receive data: {}", e);
-                                            }*/
-                                        }
-                                        Err(e) => {
-                                            println!("No data received");
-                                            println!("{}", e);
-                                        }
-                                    }*/
-                                //});
-
-                                /*match rx.try_recv() { //eseguita anche se la socket non si è connessa
-                                    Ok(frame) => {
-                                        println!("Frame received from channel");
-                                        
-                                        let image: ColorImage =  egui::ColorImage::from_rgba_unmultiplied(
-                                            [frame.width as usize, frame.height as usize],
-                                            &frame.rgba_data );
-
-                                        // Update texture
-                                        if let Some(ref mut texture) = self.display_texture {
-                                            texture.set(image, egui::TextureOptions::default());
-                                        } else {
-                                            self.display_texture = Some(ctx.load_texture(
-                                                "display_texture",
-                                                image,
-                                                egui::TextureOptions::default(),
-                                            ));
-                                        }
-
-                                        let texture = self
-                                            .display_texture
-                                            .as_ref()
-                                            .unwrap_or(self.textures.get("error").unwrap());
-                                        ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
-                                        
-                                    },
-                                    Err(_) => println!("the sender dropped or no data received"),
+                                /*// Add a loading indicator while waiting for receiver initialization
+                                if self.socket_created && self.receiver.is_none() {
+                                    ui.spinner(); // Show a spinner while connecting
+                                    ui.label("Connecting to sender...");
                                 }*/
-                            }
-                            else {
-                                ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                                //come faccio a farla comparire per più tempo?? scompare in un secondo
-                            }
 
-                            /*// Add a loading indicator while waiting for receiver initialization
-                            if self.socket_created && self.receiver.is_none() {
-                                ui.spinner(); // Show a spinner while connecting
-                                ui.label("Connecting to sender...");
-                            }*/
-
-                            
-
-                            
-                            //check if inserted address is valid
-                            /*if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
-                                let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);    
                                 
-                                let (tx, rx) = channel();
-                                self.frame_rx = Some(rx);
 
-                                //let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
-                                ///let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
-                                ///addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
-
-                                /*let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
-                                    addr_vec[0].parse::<u8>().unwrap(), 
-                                    addr_vec[1].parse::<u8>().unwrap(), 
-                                    addr_vec[2].parse::<u8>().unwrap(), 
-                                    addr_vec[3].parse::<u8>().unwrap())), 
-                                    PORT);  //port.parse::<u16>().unwrap()*/
                                 
-                                //let  (tx, mut rx) = channel();
-                                
-                                tokio::spawn(async move {
-                                    let socket = connect_to_sender(caster_addr).await;
-                                    match socket {
-                                        Ok(socket) => {
-                                            println!("Connected to Sender");
+                                //check if inserted address is valid
+                                /*if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);    
+                                    
+                                    let (tx, rx) = channel();
+                                    self.frame_rx = Some(rx);
 
-                                            match recv_data(socket).await {
-                                                Ok(frame) => {
-                                                    println!("Received data");
-                                                    //let _ = tx.send(frame);
+                                    //let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
+                                    ///let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
+                                    ///addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
+
+                                    /*let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
+                                        addr_vec[0].parse::<u8>().unwrap(), 
+                                        addr_vec[1].parse::<u8>().unwrap(), 
+                                        addr_vec[2].parse::<u8>().unwrap(), 
+                                        addr_vec[3].parse::<u8>().unwrap())), 
+                                        PORT);  //port.parse::<u16>().unwrap()*/
+                                    
+                                    //let  (tx, mut rx) = channel();
+                                    
+                                    tokio::spawn(async move {
+                                        let socket = connect_to_sender(caster_addr).await;
+                                        match socket {
+                                            Ok(socket) => {
+                                                println!("Connected to Sender");
+
+                                                match recv_data(socket).await {
+                                                    Ok(frame) => {
+                                                        println!("Received data");
+                                                        //let _ = tx.send(frame);
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("Failed to receive data: {}", e);
+                                                    }
                                                 }
-                                                Err(e) => {
+                                                /*if let Err(e) = recv_data(caster_addr, socket).await {
                                                     eprintln!("Failed to receive data: {}", e);
-                                                }
+                                                }*/
                                             }
-                                            /*if let Err(e) = recv_data(caster_addr, socket).await {
-                                                eprintln!("Failed to receive data: {}", e);
-                                            }*/
+                                            Err(_) => {
+                                                println!("No data received");
+                                            }
                                         }
-                                        Err(_) => {
-                                            println!("No data received");
-                                        }
-                                    }
-                                });
-                            } 
-                            else {
-                                ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                            }*/    
+                                    });
+                                } 
+                                else {
+                                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                                }*/    
+                            }
+
+                            
+                        });
+                    //});
+                } else {
+
+                    let stop_button = egui::Button::new(
+                        egui::RichText::new("Stop").color(egui::Color32::WHITE).size(15.0)
+                    )
+                    .fill(egui::Color32::from_rgb(200, 0, 0))
+                    .min_size(egui::vec2(60.0, 30.0));
+                    
+                    if ui.add(stop_button).clicked() {
+                        println!("Stop clicked");
+                        self.stop_notify.notify_waiters(); //in this way recv_data releases the lock
+                        
+                        if let Some(receiver) = &self.receiver {
+                            let receiver = receiver.clone();
+                            tokio::spawn(async move {
+                                let recv = receiver.lock().await;
+                                recv.stop_receiving();                               
+                            });                            
                         }
-                    });
-                //});
+                        //these are not executed after the tokio::spawn, so the last texture is not erased, how to fix it??
+                        self.receiver = None; //non lo elimino, lo sovrascrivo direttamente, altrimenti il tokio spawn fa casino
+                        self.receiver_rx = None;
+                        self.display_texture = None;
+                        self.is_receiving = false;
+                        //clear the frame queue
+                        let mut frames = self.received_frames.lock().unwrap();
+                        frames.clear();
+                        self.last_frame_time = None;
+                        self.frame_times.clear();
+                        self.current_fps = 0.0;
+                        
+                    }
+                    ui.add_space(10.0);
+                }
+
                 // Check if we have a pending receiver initialization
                 if let Some(mut rx) = self.receiver_rx.take() {  //take consumes the receiver_rx
                     
@@ -757,7 +813,7 @@ impl RustreamApp {
                         }
                         Err(TryRecvError::Closed) => {
                             ui.label(RichText::new("Failed to receive receiver from channel").color(Color32::RED));
-                            self.socket_created = false;
+                            //self.socket_created = false;
                             self.receiver_rx = None;
                         }
                     }
@@ -767,39 +823,40 @@ impl RustreamApp {
                 if let Some(receiver) = &mut self.receiver { //i redo the check to extract the sender from Option<Sender>
                     let receiver_clone = receiver.clone();
 
-                    let  (tx, rx) = channel(); //oneshot
-                    self.frame_rx = Some(rx);
+                    //let  (tx, rx) = channel(); //oneshot
+                    //self.frame_rx = Some(rx);
 
                     let rcv_frames = self.received_frames.clone();
-                    let rcv_frames1 = self.received_frames.clone();
 
-                    if let Some(caster_addr) = self.caster_addr {
+                    //if let Some(caster_addr) = self.caster_addr {
+                        let stop_notify = self.stop_notify.clone();
                     
                         tokio::spawn(async move {
                             
                             let receiver_clone2 = Arc::clone(&receiver_clone);
-                            let mut receiver = receiver_clone.lock().await;
+                            let receiver = receiver_clone.lock().await;
                             //let frame;
                             
-                            let rx = receiver.frame_rx.take();
+                            //let rx = receiver.frame_rx.take();
                             
                             //caster address changed, stop previous streaming and start the new one
-                            if receiver.caster != caster_addr { 
+                            /*if receiver.caster != caster_addr { 
                                 receiver.caster = caster_addr;
                                 drop(receiver);
                                 println!("Caster address changed, reconnecting to new sender");
                                 //connect the socket to the new address and start receiving
-                                start_receiving(rcv_frames1, receiver_clone2, false).await;
-                              
-                              //start receiving only if it's the first time 
-                            } else if !receiver.started_receiving { 
+                                start_receiving(rcv_frames, receiver_clone2, false, stop_notify).await;
+                              */
+                              //start receiving only if it's the first time
+                            //} else 
+                            if !receiver.started_receiving { 
                                 //drop the lock before starting the receiving task
                                 drop(receiver);
                                 //println!("Receiving from the same sender");
-                                start_receiving(rcv_frames1, receiver_clone2, true).await;
+                                start_receiving(rcv_frames, receiver_clone2, stop_notify).await;
                                 
                             }
-                            println!("After start_receiving completed");
+                            //println!("After start_receiving completed");
                             /*if let Some(frame) = frame {
                                 println!("Frame received from start_receiving");
                                 let mut frames = rcv_frames.lock().unwrap();
@@ -882,7 +939,7 @@ impl RustreamApp {
                                 }   
                                 ctx.request_repaint();                 
                         //}
-                    } 
+                    //} 
 
                     
                     /*tokio::spawn(async move {
@@ -1009,7 +1066,8 @@ impl eframe::App for RustreamApp {
 
             PageView::Caster => self.render_caster_page(ui, ctx, frame),
 
-            PageView::Receiver => self.render_receiver_mode(ui, ctx),
+            PageView::Receiver => self.render_receiver_mode(ctx),
         });
+        ctx.request_repaint_after(Duration::from_millis(1000));
     }
 }
