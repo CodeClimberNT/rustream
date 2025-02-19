@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::collections::VecDeque;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc::sync_channel};
 // use std::time::Duration;
 
 use lazy_static::lazy_static;
@@ -36,12 +36,12 @@ pub struct RustreamApp {
     frame_grabber: ScreenCapture,
     audio_capturer: AudioCapturer,
     video_recorder: VideoRecorder,
-    page: PageView,                              // Enum to track modes
-    display_texture: Option<TextureHandle>,      // Texture for the screen capture
+    page: PageView,                           // Enum to track modes
+    display_texture: Option<TextureHandle>,   // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>, // List of textures
-    preview_active: bool,
-    cropped_frame: Option<CapturedFrame>,        // Cropped image to send
-    address_text: String,     
+    cropped_frame: Option<CapturedFrame>,     // Cropped image to send
+    captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
+    address_text: String,  
     caster_addr: Option<SocketAddr>,                   // Text input for the receiver mode
     //preview_active: bool,
     streaming_active: bool,
@@ -49,9 +49,9 @@ pub struct RustreamApp {
     drag_start: Option<Pos2>,
     capture_area: Option<CaptureArea>,
     show_config: bool, // Add this field
-    sender: Option<Arc<Sender>>,
+    sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
     receiver: Option<Arc<tokio::sync::Mutex<Receiver>>>,
-    sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<Sender>>>,
+    sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<tokio::sync::Mutex<Sender>>>>,
     receiver_rx: Option<tokio::sync::oneshot::Receiver<Receiver>>,
     socket_created: bool,
     //frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
@@ -60,8 +60,10 @@ pub struct RustreamApp {
     current_fps: f32,
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
     //frame_ready: bool,
-    pub stop_notify: Arc<Notify>,
+    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     is_receiving: bool,
+    stop_task: Option<tokio::task::JoinHandle<()>>, // Handle to the stop task
+    started_capture: bool,
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
     triggered_actions: Vec<HotkeyAction>,
@@ -175,12 +177,13 @@ impl RustreamApp {
             //frame_ready: false,
             stop_notify: Arc::new(Notify::new()),
             is_receiving: false,
+            captured_frames: Arc::new(Mutex::new(VecDeque::new())),
+            started_capture: false,
             hotkey_manager: HotkeyManager::new(),
             page: PageView::HomePage,
             display_texture: None,
             cropped_frame: None,
             address_text: String::new(),
-            preview_active: false,
             is_selecting: false,
             capture_area: None,
             show_config: false,
@@ -207,6 +210,7 @@ impl RustreamApp {
         self.sender = None;
         self.socket_created = false;
         self.streaming_active = false;
+        self.started_capture = false;
         //self.frame_rx = None;
     }
 
@@ -672,13 +676,28 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            // if self.preview_active {
-                if let Some(display_frame) = self.frame_grabber.next_frame(self.capture_area) {
-                    // Record if active
-                    if self.video_recorder.is_recording() {
-                        self.video_recorder.record_frame(&display_frame);
-                    }
-                    
+            //modificare qui, metere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
+            //poi metto il frame catturato in un mutex e l'ui lo prenderà da lì
+            
+            let cap_frames = self.captured_frames.clone();
+
+            //let (tx, mut rx) = sync_channel(1);
+            //let tx_clone = tx.clone();
+            
+            if !self.started_capture { //call capture_frame only once
+                self.started_capture = true;
+                self.frame_grabber.capture_frame(cap_frames, self.capture_area);
+            }
+            
+            let mut frames = self.captured_frames.lock().unwrap();
+            if let Some(display_frame) = frames.pop_front() {
+                drop(frames);
+
+                // TODO: Move to receiver
+                if self.video_recorder.is_recording() {
+                    self.video_recorder.record_frame(&display_frame);
+                }
+       
                 if self.streaming_active {
                     // Initialize sender if it doesn't exist
                     /*if s.is_none() {
@@ -697,7 +716,7 @@ impl RustreamApp {
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
-                            let _ = tx.send(Arc::new(sender));
+                            let _ = tx.send(Arc::new(tokio::sync::Mutex::new(sender)));
                         });
                         //store rx to poll it later to see if initialization completed, since the channel sender is async
                         self.sender_rx = Some(rx);   
@@ -968,25 +987,32 @@ impl RustreamApp {
                         
                         if let Some(receiver) = &self.receiver {
                             let receiver = receiver.clone();
-                            tokio::spawn(async move {
+                            let handle = tokio::spawn(async move {
                                 let recv = receiver.lock().await;
                                 recv.stop_receiving();                               
-                            });                            
-                        }
-                        //these are not executed after the tokio::spawn, so the last texture is not erased, how to fix it??
-                        self.receiver = None; //non lo elimino, lo sovrascrivo direttamente, altrimenti il tokio spawn fa casino
+                            });  
+
+                            self.stop_task = Some(handle);                          
+                        }   
+                    }
+                    ui.add_space(10.0);
+                }
+
+                // Continue stopping mechanism after clode_connection message is sent
+                if let Some(handle) = &self.stop_task {
+                    if handle.is_finished() {
+                        self.stop_task.take();
+                        self.receiver = None;
                         self.receiver_rx = None;
                         self.display_texture = None;
                         self.is_receiving = false;
-                        //clear the frame queue
+                
                         let mut frames = self.received_frames.lock().unwrap();
-                        frames.clear();
+                        frames.clear();  //clear the frame queue
                         self.last_frame_time = None;
                         self.frame_times.clear();
                         self.current_fps = 0.0;
-                        
                     }
-                    ui.add_space(10.0);
                 }
 
                 // Check if we have a pending receiver initialization
@@ -1086,14 +1112,14 @@ impl RustreamApp {
                             //let mut frames = self.received_frames.lock().unwrap();
                             
                                 if let Some(frame) = frame {
-                                    println!("Frame popped from mutex");
+                                    //println!("Frame popped from mutex");
                                     //self.frame_rx = None;
                                     //println!("Frame received from mutex");
                                     let image = egui::ColorImage::from_rgba_unmultiplied(
                                         [frame.width as usize, frame.height as usize], 
                                         &frame.rgba_data
                                     );
-                                    println!("image created");
+                                    //println!("image created");
                                     
                                     // Update FPS counter
                                     let now = std::time::Instant::now();
@@ -1145,20 +1171,12 @@ impl RustreamApp {
 
                     
                 }
-                
-                
 
                 let texture = self
                     .display_texture
                     .as_ref()
                     .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
                 ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
-                
-
-                // Display FPS counter
-                if self.current_fps > 0.0 {
-                    ui.label(format!("FPS: {:.1}", self.current_fps));
-                }
                             
             });
         });
