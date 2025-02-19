@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::collections::VecDeque;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc::sync_channel};
+use std::sync::{Arc, Mutex};
 // use std::time::Duration;
 
 use lazy_static::lazy_static;
@@ -192,7 +192,7 @@ impl RustreamApp {
             previous_monitor: 0,
             caster_addr: None,
             drag_start: None,
-            
+            stop_task: None,            
         }
     }
 
@@ -1116,7 +1116,7 @@ impl RustreamApp {
                                     //self.frame_rx = None;
                                     //println!("Frame received from mutex");
                                     let image = egui::ColorImage::from_rgba_unmultiplied(
-                                        [frame.width as usize, frame.height as usize], 
+                                        [frame.width, frame.height], 
                                         &frame.rgba_data
                                     );
                                     //println!("image created");
