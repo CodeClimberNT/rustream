@@ -1,48 +1,102 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::mpsc;
+use crate::config::Config;
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    Stream, StreamConfig,
+};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
-pub struct AudioCapture {
-    stream: Option<cpal::Stream>,
-    sender: mpsc::Sender<Vec<f32>>,
+// pub struct AudioStream {
+//     buffer: RingBuffer<f32>,
+//     encoder: AudioEncoder,
+//     network_sender: NetworkSender,
+// }
+
+pub struct AudioCapturer {
+    config: Arc<Mutex<Config>>,
+    is_capturing: Arc<AtomicBool>,
+    stream: Option<Stream>,
+    audio_buffer: Vec<f32>,
+    thread_buffer: Arc<Mutex<Vec<f32>>>,
 }
 
-impl AudioCapture {
-    pub fn new() -> (Self, mpsc::Receiver<Vec<f32>>) {
-        let (sender, receiver) = mpsc::channel();
+impl AudioCapturer {
+    pub fn new(config: Arc<Mutex<Config>>) -> Self {
+        Self {
+            config,
+            is_capturing: Arc::new(AtomicBool::new(false)),
+            stream: None,
+            audio_buffer: Vec::new(),
+            thread_buffer: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
 
-        (
-            AudioCapture {
-                stream: None,
-                sender,
-            },
-            receiver,
-        )
+    pub fn take_audio_buffer(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.audio_buffer)
     }
 
     pub fn start(&mut self) -> Result<(), String> {
+        if self.is_capturing.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        self.audio_buffer.clear();
+        if let Ok(mut buffer) = self.thread_buffer.lock() {
+            buffer.clear();
+        }
+
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("No input device available")?;
+        let device = host.default_input_device().ok_or("No input device found")?;
 
-        let config = device.default_input_config().map_err(|e| e.to_string())?;
+        // Get supported config
+        let supported_config: cpal::SupportedStreamConfig =
+            device.default_input_config().map_err(|e| e.to_string())?;
 
-        let sender = self.sender.clone();
+        let stream_config: StreamConfig = supported_config.into();
+
+        {
+            let audio = &mut self.config.lock().unwrap().audio;
+            audio.sample_rate = stream_config.sample_rate.0;
+            audio.channels = stream_config.channels;
+        }
+
+        let is_capturing = self.is_capturing.clone();
+
+        let buffer_clone = self.thread_buffer.clone();
 
         let stream = device
             .build_input_stream(
-                &config.into(),
+                &stream_config,
                 move |data: &[f32], _: &_| {
-                    sender.send(data.to_vec()).unwrap_or_default();
+                    if is_capturing.load(Ordering::SeqCst) {
+                        if let Ok(mut buffer) = buffer_clone.lock() {
+                            buffer.extend_from_slice(data);
+                        }
+                    }
                 },
-                |err| eprintln!("Audio stream error: {}", err),
+                move |err| log::error!("Audio stream error: {}", err),
                 None,
             )
             .map_err(|e| e.to_string())?;
 
         stream.play().map_err(|e| e.to_string())?;
         self.stream = Some(stream);
-
+        self.is_capturing.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(stream) = self.stream.take() {
+            drop(stream);
+        }
+        self.is_capturing.store(false, Ordering::SeqCst);
+
+        // Transfer data from thread buffer to main buffer
+        if let Ok(mut buffer) = self.thread_buffer.lock() {
+            self.audio_buffer.append(&mut buffer);
+            buffer.clear();
+        }
     }
 }

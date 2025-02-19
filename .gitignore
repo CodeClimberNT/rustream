@@ -14,7 +14,8 @@ target/
 *.pdb
 
 *.mp4
-
+*.mkv
+/temp/
 # Added by cargo
 
 /target
