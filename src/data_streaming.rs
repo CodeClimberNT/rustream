@@ -22,6 +22,7 @@ pub struct Sender {
     socket: Arc<UdpSocket>,
     receivers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: Arc<Mutex<u32>>,
+    started_sending: bool,
     //serve pure il frame da mandare? o il buffer di frames?
 }
 
@@ -46,20 +47,23 @@ impl Sender {
             socket: Arc::new(sock), 
             receivers: Arc::new(Mutex::new(Vec::new())),
             frame_id: Arc::new(Mutex::new(0)),
+            started_sending: false,
         }
     }
 
     pub async fn listen_for_receivers(&self) {
-        let mut buf = [0; 1472];
+        
         let receivers = self.receivers.clone();
         let socket = self.socket.clone();
         
         tokio::spawn(async move {
+            
             loop {
+                let mut buf = [0; 1472];
                 match socket.recv_from(&mut buf).await {
                     Ok((_, peer_addr)) => {                        
                         if let Ok(message) = from_utf8(&buf) {                        
-                            
+
                             if message.trim_matches('\0') == "REQ_FRAMES" {
                                 println!("Received connection request from: {}", &peer_addr);
                                 let mut receivers = receivers.lock().await;
@@ -141,9 +145,23 @@ impl Sender {
     }
 }
 
-pub async fn start_streaming(sender: Arc<Sender>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_streaming(sender: Arc<Mutex<Sender>>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
-    sender.listen_for_receivers().await;
+    let sender_clone = sender.clone();
+    //let sender_clone1 = sender.clone();
+    let mut sender = sender.lock().await;
+    if !sender.started_sending {
+        sender.started_sending = true;
+        //drop(sender);
+        //tokio::spawn(async move {
+            //let sender = sender_clone.lock().await;
+            sender.listen_for_receivers().await;
+            //drop(sender);
+        //});       
+    }
+    //let sender1 = sender_clone.lock().await;
+    //println!("Sender1 lock acquired");
+    
     let frame_id = sender.frame_id.clone();
     
     return match sender.send_data(frame, frame_id).await {
@@ -340,7 +358,7 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
                 Ok(frame) => {
                     let mut frames = frames_vec.lock().unwrap();
                     frames.push_back(frame);
-                    println!("Frame pushed to frames_vec");
+                    //println!("Frame pushed to frames_vec");
                 },
                 Err(e) =>  {
                     eprintln!("Error decoding frame: {}", e);
@@ -377,6 +395,7 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
     //println!("Inside start_receiving");
    
     let mut recv = receiver.lock().await;
+    let stop_notify1 = stop_notify.clone();
      //println!("Receiver lock acquired");
 
     //if receiver changed caster address
@@ -450,10 +469,10 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
                     //println!("inside tokio spawn");
                     //let mut recv = rc.lock().await;
     
-                  
+                   
                     println!("Calling recv_data");
                     //if let Some(tx) = recv.frame_tx.clone() {
-                        if let Err(e) = recv.recv_data(tx, stop_notify).await{
+                        if let Err(e) = recv.recv_data(tx, stop_notify1).await{
                             println!("Error receiving frame: {}", e);
                         }
                         //if recv_data never ends recv is never dropped?
@@ -475,15 +494,26 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
         });
         
         
-        while let Some(frame) = rx.recv().await {
+        //while let Some(frame) = rx.recv().await {
+        loop {
             let frames_vec1 = frames_vec.clone();
-            tokio::spawn(async move {
-        
-                println!("Calling process_frame");
-                process_frame(frames_vec1, frame).await;
-                // frames_vec is the vector of frames to share with ui
+            tokio::select! {
+                _ = stop_notify.notified() => {
+                    println!("Received stop signal, exiting start_receiving"); 
+                    break; // Gracefully exit when `notify_waiters()` is called
+                }
+    
+                Some(frame) = rx.recv() => {
+                    
+                    tokio::spawn(async move {
                 
-            });   
+                        println!("Calling process_frame");
+                        process_frame(frames_vec1, frame).await;
+                        // frames_vec is the vector of frames to share with ui
+                    
+                    }); 
+                }
+            }  
         }
     } 
 }
@@ -501,7 +531,7 @@ fn decode_from_h265_to_rgba(frame: Vec<u8>) -> Result<CapturedFrame, Box<dyn std
 
         "windows" => 
          // On Windows, use CUDA/NVENC (for NVIDIA GPUs)
-         (["-hwaccel", "cuda"], ["-c:v", "hevc_cuda"]),
+         (["-hwaccel", "auto"], ["-c:v", "hevc_cuda"]),
 
         "macos" => 
         // On macOS, you might rely on software decoding or choose available hardware (e.g., use VideoToolbox)
