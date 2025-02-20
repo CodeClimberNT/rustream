@@ -356,8 +356,8 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
             //drop(frames);
             let start = Instant::now();
             let decoded_frame = decode_from_h265_to_rgba(frame);
-            let dencode_time = start.elapsed();
-            println!("Dencoding time: {:?}", dencode_time);
+            let decode_time = start.elapsed();
+            println!("Decoding time: {:?}", decode_time);
             match decoded_frame {
                 Ok(frame) => {
                     let mut frames = frames_vec.lock().unwrap();
