@@ -648,13 +648,7 @@ impl RustreamApp {
                 ) {
                     self.streaming_active = !self.streaming_active;
                 }
-
-                if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
-                    self.show_config = true;
-                }
-                self.render_recording_controls(ui);
-                ui.add_space(50.0);
-
+                
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
                    let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
                     let displays = DisplayInfo::all().unwrap_or_default();
@@ -674,6 +668,13 @@ impl RustreamApp {
                     .arg(display.scale_factor.to_string())
                     .spawn();
                 }
+
+                if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
+                    self.show_config = true;
+                }
+                self.render_recording_controls(ui);
+                ui.add_space(50.0);
+
                 
             });
         });

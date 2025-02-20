@@ -117,10 +117,6 @@ impl eframe::App for AnnotationApp {
                     (color_f32[3] * 255.0) as u8,
                 );
 
-                if ui.button(RichText::new("🗑 Clear")).clicked() {
-                    self.annotations.clear();
-                }
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Exit button on the right
                     if ui.button(RichText::new("❌").size(20.0)).clicked() {
@@ -129,6 +125,10 @@ impl eframe::App for AnnotationApp {
                     // Tutorial button
                     if ui.button(RichText::new("❓").size(20.0)).clicked() {
                         self.show_tutorial = !self.show_tutorial;
+                    }
+                    ui.separator();
+                    if ui.button(RichText::new("🗑 Clear")).clicked() {
+                        self.annotations.clear();
                     }
                 });
             });
