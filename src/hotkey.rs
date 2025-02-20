@@ -4,6 +4,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum HotkeyAction {
     ToggleStreaming,
+    Annotation,
     StartRecording,
     Home,
     ClosePopup,
@@ -130,6 +131,15 @@ impl HotkeyManager {
                 key: Key::Escape,
             },
             HotkeyAction::ClosePopup,
+        );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: true,
+                key: Key::A,
+            },
+            HotkeyAction::Annotation,
         );
 
         // Copy defaults to active shortcuts

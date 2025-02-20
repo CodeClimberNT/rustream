@@ -245,32 +245,8 @@ impl RustreamApp {
                 }
                 
                 ui.add_space(30.0);
+
                 
-                if ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("TEST ANNOTATION").size(32.0).strong(),
-                    )
-                    .min_size(egui::vec2(300.0, 60.0)),
-                ).clicked() {
-                   let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
-                    let displays = DisplayInfo::all().unwrap_or_default();
-                    //info!("Displays: {:?}", displays);
-                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
-                        error!("Monitor not found: {}", selected_monitor);
-                        std::process::exit(1);
-                    });
-                    //display name + x and y
-                    info!("Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
-                    let _ = Command::new(env::current_exe().unwrap())
-                    .arg("--overlay:annotation")
-                    .arg(display.x.to_string())
-                    .arg(display.y.to_string())
-                    .arg(display.width.to_string())
-                    .arg(display.height.to_string())
-                    .arg(display.scale_factor.to_string())
-                    .output()
-                    .expect("failed to execute process");
-                }
             });
         });
     }
@@ -677,6 +653,28 @@ impl RustreamApp {
                     self.show_config = true;
                 }
                 self.render_recording_controls(ui);
+                ui.add_space(50.0);
+
+                if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
+                   let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
+                    let displays = DisplayInfo::all().unwrap_or_default();
+                    //info!("Displays: {:?}", displays);
+                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
+                        error!("Monitor not found: {}", selected_monitor);
+                        std::process::exit(1);
+                    });
+
+                    #[allow(unused_must_use)]
+                    Command::new(env::current_exe().unwrap())
+                    .arg("--overlay:annotation")
+                    .arg(display.x.to_string())
+                    .arg(display.y.to_string())
+                    .arg(display.width.to_string())
+                    .arg(display.height.to_string())
+                    .arg(display.scale_factor.to_string())
+                    .spawn();
+                }
+                
             });
         });
 
@@ -684,7 +682,7 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            //modificare qui, metere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
+            //modificare qui, mettere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
             //poi metto il frame catturato in un mutex e l'ui lo prenderà da lì
             
             let cap_frames = self.captured_frames.clone();
@@ -1223,9 +1221,6 @@ impl RustreamApp {
 
 
     fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {
-        // Check if Alt is pressed for underline
-        let alt_pressed = ui.input(|i| i.modifiers.alt);
-
         // Get hotkey text if exists
         let hotkey_text = format!(
             " ({})",
@@ -1233,13 +1228,10 @@ impl RustreamApp {
                 .get_shortcut_text(&action)
                 .unwrap_or_default()
         );
-
-        // Create full text for size calculation
-        let full_text = format!("{}{}", label, hotkey_text);
-
-        // Calculate size with padding
+    
+        // Calculate size with padding for the label only
         let galley = ui.painter().layout_no_wrap(
-            full_text.clone(),
+            label.to_string(),
             egui::TextStyle::Button.resolve(ui.style()),
             egui::Color32::PLACEHOLDER,
         );
@@ -1248,18 +1240,16 @@ impl RustreamApp {
             galley.size().x + padding.x * 2.0,
             galley.size().y + padding.y * 2.0,
         );
+        
+    
+        // Create button with fixed minimum size and hover text
+        let response = ui.add_sized(
+            min_size,
+            egui::Button::new(label.to_string())
+        ).on_hover_text(format!("{}{}", label, hotkey_text));
+    
 
-        // Create displayed text (with or without hotkey)
-        let display_text = if alt_pressed {
-            full_text
-        } else {
-            label.to_string()
-        };
-
-        // Create button with fixed minimum size
-        ui.add_sized(min_size, egui::Button::new(display_text))
-            .clicked()
-            || self.triggered_actions.contains(&action)
+        response.clicked() || self.triggered_actions.contains(&action)
     }
 
     fn clickable_element<T>(

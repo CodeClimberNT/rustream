@@ -18,7 +18,7 @@ use area_capture::AreaCaptureApp;
 use egui::{Pos2, Vec2, ViewportBuilder, X11WindowType};
 
 use env_logger::Env;
-use log::{error, info, LevelFilter};
+use log::{error, LevelFilter};
 
 use eframe::NativeOptions;
 
