@@ -1,13 +1,12 @@
 use super::{CaptureArea, CapturedFrame};
 use crate::config::Config;
-use image::{ImageBuffer, RgbaImage};
+use log::{debug, error, warn};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
     thread,
 };
-use tracing::{debug, error, info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
@@ -77,7 +76,8 @@ impl ScreenCapture {
             self.capturer = match Capturer::new(monitor) {
                 Ok(cap) => Some(cap),
                 Err(e) => {
-                    error!("{}", CaptureError::InitError(e.to_string()));
+                    let err = CaptureError::InitError(e.to_string());
+                    error!("{}", err);
                     return None;
                 }
             };
@@ -129,6 +129,9 @@ impl ScreenCapture {
 
         let config = self.config.clone();
 
+        //TODO: check best value
+        let frame_limit = 5;
+
         thread::spawn(move || {
             let mut current_monitor_index: Option<usize> = None;
             let mut capturer: Option<Capturer> = None;
@@ -164,7 +167,9 @@ impl ScreenCapture {
                             current_dimensions = (width, height);
                         }
                         Err(e) => {
-                            error!("Failed to initialize Capturer: {:?}", e);
+                            let err = CaptureError::InitError(e.to_string());
+                            error!("{}", err);
+
                             thread::sleep(std::time::Duration::from_millis(100));
                             return;
                         }
@@ -175,13 +180,6 @@ impl ScreenCapture {
                 if let Some(ref mut cap) = capturer {
                     match cap.frame() {
                         Ok(raw_frame) => {
-                            // let img_buffer: RgbaImage = ImageBuffer::from_raw(
-                            //     current_dimensions.0,
-                            //     current_dimensions.1,
-                            //     raw_frame.to_vec(),
-                            // )
-                            // .expect("Couldn't create image buffer from raw frame");
-
                             let rgba_img = CapturedFrame::from_bgra_buffer(
                                 raw_frame.to_vec(),
                                 current_dimensions.0 as usize,
@@ -189,12 +187,14 @@ impl ScreenCapture {
                                 capture_area,
                             );
 
-                            let mut cap_frames = captured_frames.lock().unwrap();
-                            cap_frames.push_back(rgba_img);
-                            /*if let Err(e) = tx.send(rgba_img) {
-                                println!("Failed to send captured frame: {}", e);
-                            }*/
+                            let mut frames = captured_frames.lock().unwrap();
+                            if frames.len() >= frame_limit {
+                                warn!("Frame buffer full; removing oldest frame.");
+                                frames.pop_front(); // Remove oldest frame when buffer is full
+                            }
+                            frames.push_back(rgba_img);
                         }
+
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
                                 debug!("Frame not ready; skipping this frame.");
@@ -214,7 +214,7 @@ impl ScreenCapture {
                         },
                     }
                 }
-                thread::sleep(std::time::Duration::from_millis(1000 / 40));
+                // thread::sleep(std::time::Duration::from_millis(1000 / 40));
             }
         });
     }

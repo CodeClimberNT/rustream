@@ -5,7 +5,7 @@ use serde_json::json;
 use std::io::Write;
 
 #[derive(Default)]
-pub struct SecondaryApp {
+pub struct AreaCaptureApp {
     is_selecting: bool,
     capture_area: Option<CaptureArea>,
     drag_start: Option<Pos2>,
@@ -13,7 +13,7 @@ pub struct SecondaryApp {
     show_popup: bool,
 }
 
-impl eframe::App for SecondaryApp {
+impl eframe::App for AreaCaptureApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // let mut app = self.rustream_app.lock().unwrap();
 
@@ -125,12 +125,7 @@ impl eframe::App for SecondaryApp {
                                             )
                                             .clicked()
                                         {
-                                            let output = CaptureArea::new(
-                                                (rect.min.x).round() as usize,
-                                                (rect.min.y).round() as usize,
-                                                (rect.width()).round() as usize,
-                                                (rect.height()).round() as usize,
-                                            );
+                                            let output = CaptureArea::from_rect(rect);
 
                                             let output_with_status = json!({
                                                 "status": "success",

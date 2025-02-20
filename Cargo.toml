@@ -46,13 +46,11 @@
     hound = { version = "3.5.1", default-features = false }
 
     # Utilities
-    # log = { version = "0.4.22", default-features = false }
-    # env_logger = { version = "0.11.6", default-features = false }
-    tracing = { version = "0.1", features = ["attributes"] }
-    tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+    log = { version = "0.4.22", default-features = false }
+    env_logger = { version = "0.11.6", default-features = false }
+
 
     thiserror = { version = "2.0.11", default-features = false }
-    lazy_static = { version = "1.5.0", default-features = false }
 
 
     rfd = { version = "0.15.1", features = [

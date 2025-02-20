@@ -13,41 +13,36 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 // use std::time::Duration;
 
-use lazy_static::lazy_static;
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText, TextStyle, TextureHandle, TopBottomPanel, Ui, Window
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextStyle, TextureHandle, TopBottomPanel, Ui, Window
 };
 
 use std::env;
 use std::process::Command;
 
 use display_info::DisplayInfo;
-use tracing::{debug, error, info, warn};
+use log::{debug, error, info};
 
-lazy_static! {
-    pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> =
-        Arc::new(Mutex::new(CaptureArea::default()));
-}
+
 
 
 pub struct RustreamApp {
     pub config: Arc<Mutex<Config>>,
+    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
+    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
     audio_capturer: AudioCapturer,
     video_recorder: VideoRecorder,
     page: PageView,                           // Enum to track modes
     display_texture: Option<TextureHandle>,   // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>, // List of textures
-    cropped_frame: Option<CapturedFrame>,     // Cropped image to send
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
     address_text: String,  
     caster_addr: Option<SocketAddr>,                   // Text input for the receiver mode
-    //preview_active: bool,
     streaming_active: bool,
     is_selecting: bool,
-    drag_start: Option<Pos2>,
     capture_area: Option<CaptureArea>,
     show_config: bool, // Add this field
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
@@ -55,13 +50,9 @@ pub struct RustreamApp {
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<tokio::sync::Mutex<Sender>>>>,
     receiver_rx: Option<tokio::sync::oneshot::Receiver<Receiver>>,
     socket_created: bool,
-    //frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
     last_frame_time: Option<std::time::Instant>,
     frame_times: std::collections::VecDeque<std::time::Duration>,
     current_fps: f32,
-    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
-    //frame_ready: bool,
-    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     is_receiving: bool,
     stop_task: Option<tokio::task::JoinHandle<()>>, // Handle to the stop task
     started_capture: bool,
@@ -117,14 +108,6 @@ pub enum PageView {
     Receiver,
 }
 
-#[derive(Debug, Clone)]
-struct MonitorInfo {
-    id: usize,
-    name: String,
-    position: (i32, i32),
-    
-}
-
 impl RustreamApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -168,14 +151,12 @@ impl RustreamApp {
             sender_rx: None,
             streaming_active: false,
             socket_created: false,
-            //frame_rx: None,
             receiver: None,
             receiver_rx: None,
             last_frame_time: None,
             frame_times: std::collections::VecDeque::with_capacity(60),
             current_fps: 0.0,
             received_frames: Arc::new(Mutex::new(VecDeque::new())),
-            //frame_ready: false,
             stop_notify: Arc::new(Notify::new()),
             is_receiving: false,
             captured_frames: Arc::new(Mutex::new(VecDeque::new())),
@@ -183,7 +164,6 @@ impl RustreamApp {
             hotkey_manager: HotkeyManager::new(),
             page: PageView::HomePage,
             display_texture: None,
-            cropped_frame: None,
             address_text: String::new(),
             is_selecting: false,
             capture_area: None,
@@ -192,7 +172,6 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            drag_start: None,
             stop_task: None,            
         }
     }
@@ -254,15 +233,43 @@ impl RustreamApp {
 
                 ui.add_space(30.0);
                 if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
-                        )
-                        .min_size(egui::vec2(300.0, 60.0)),
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
                     )
-                    .clicked()
+                    .min_size(egui::vec2(300.0, 60.0)),
+                )
+                .clicked()
                 {
                     self.set_page(PageView::Receiver);
+                }
+                
+                ui.add_space(30.0);
+                
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("TEST ANNOTATION").size(32.0).strong(),
+                    )
+                    .min_size(egui::vec2(300.0, 60.0)),
+                ).clicked() {
+                   let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
+                    let displays = DisplayInfo::all().unwrap_or_default();
+                    //info!("Displays: {:?}", displays);
+                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
+                        error!("Monitor not found: {}", selected_monitor);
+                        std::process::exit(1);
+                    });
+                    //display name + x and y
+                    info!("Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
+                    let _ = Command::new(env::current_exe().unwrap())
+                    .arg("--overlay:annotation")
+                    .arg(display.x.to_string())
+                    .arg(display.y.to_string())
+                    .arg(display.width.to_string())
+                    .arg(display.height.to_string())
+                    .arg(display.scale_factor.to_string())
+                    .output()
+                    .expect("failed to execute process");
                 }
             });
         });
@@ -286,17 +293,16 @@ impl RustreamApp {
                 // Manual capture area input
                 ui.heading("Capture Area");
                 ui.horizontal(|ui| {
-                    let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
+                    let mut area = self.capture_area.unwrap_or_default();
                     //println!("this is the global variable: {:?}", *area);
 
                     ui.vertical(|ui| {
-                        // FIXME: X=0 value error
                         ui.label("X:");
                         let mut x_str = area.x.to_string();
                         if ui.text_edit_singleline(&mut x_str).changed() {
                             if let Ok(x) = x_str.parse() {
                                 area.x = x;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
 
@@ -305,7 +311,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut y_str).changed() {
                             if let Ok(y) = y_str.parse() {
                                 area.y = y;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
                     });
@@ -316,7 +322,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut width_str).changed() {
                             if let Ok(width) = width_str.parse() {
                                 area.width = width;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
 
@@ -325,7 +331,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut height_str).changed() {
                             if let Ok(height) = height_str.parse() {
                                 area.height = height;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
                     });
@@ -376,9 +382,9 @@ impl RustreamApp {
                             std::process::exit(1);
                         });
                         //display name + x and y
-                        println!("[INFO] Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
+                        info!("Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
                         let output = Command::new(env::current_exe().unwrap())
-                        .arg("--secondary")
+                        .arg("--overlay:selection")
                         .arg(display.x.to_string())
                         .arg(display.y.to_string())
                         .arg(display.width.to_string())
@@ -653,6 +659,7 @@ impl RustreamApp {
         ui.heading("Monitor Feedback");
         ui.separator();
         ui.vertical_centered(|ui| {
+        //TODO: add toogle preview to save resources 
             ui.horizontal(|ui| {
                 if self.action_button(
                     ui,
@@ -661,7 +668,7 @@ impl RustreamApp {
                     } else {
                         "Start Streaming"
                     },
-                    HotkeyAction::TogglePreview, //FIXME: Streaming action
+                    HotkeyAction::ToggleStreaming, 
                 ) {
                     self.streaming_active = !self.streaming_active;
                 }
@@ -687,6 +694,7 @@ impl RustreamApp {
             
             if !self.started_capture { //call capture_frame only once
                 self.started_capture = true;
+                //FIXME: capture area need to be sent across thread
                 self.frame_grabber.capture_frame(cap_frames, self.capture_area);
             }
             

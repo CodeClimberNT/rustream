@@ -1,11 +1,11 @@
 use super::{BgraBuffer, CaptureArea, RgbaBuffer};
 // use image::{ImageBuffer, RgbaImage};
 use image::RgbaImage;
+use log::debug;
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tracing::debug;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
@@ -187,6 +187,7 @@ impl CapturedFrame {
 
         Ok(output.stdout)
     }
+
     pub fn save(&self, path: &PathBuf) -> Result<(), image::ImageError> {
         let image: RgbaImage = image::ImageBuffer::from_raw(
             self.width as u32,
