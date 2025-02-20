@@ -4,13 +4,13 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum HotkeyAction {
     ToggleStreaming,
-    TogglePreview,
+    Annotation,
     StartRecording,
     Home,
-    // FIXME: Quit not used -> remove or implement?
-    Quit,
     ClosePopup,
     // TODO: Add more actions
+    // TogglePreview,
+    // Quit,
 }
 
 impl HotkeyAction {
@@ -87,15 +87,15 @@ impl HotkeyManager {
             },
             HotkeyAction::ToggleStreaming,
         );
-        self.default_shortcuts.insert(
-            KeyCombination {
-                ctrl: false,
-                shift: false,
-                alt: false,
-                key: Key::P,
-            },
-            HotkeyAction::TogglePreview,
-        );
+        // self.default_shortcuts.insert(
+        //     KeyCombination {
+        //         ctrl: false,
+        //         shift: false,
+        //         alt: false,
+        //         key: Key::P,
+        //     },
+        //     HotkeyAction::TogglePreview,
+        // );
         self.default_shortcuts.insert(
             KeyCombination {
                 ctrl: false,
@@ -114,15 +114,15 @@ impl HotkeyManager {
             },
             HotkeyAction::Home,
         );
-        self.default_shortcuts.insert(
-            KeyCombination {
-                ctrl: true,
-                shift: false,
-                alt: false,
-                key: Key::Q,
-            },
-            HotkeyAction::Quit,
-        );
+        // self.default_shortcuts.insert(
+        //     KeyCombination {
+        //         ctrl: true,
+        //         shift: false,
+        //         alt: false,
+        //         key: Key::Q,
+        //     },
+        //     HotkeyAction::Quit,
+        // );
         self.default_shortcuts.insert(
             KeyCombination {
                 ctrl: false,
@@ -132,15 +132,22 @@ impl HotkeyManager {
             },
             HotkeyAction::ClosePopup,
         );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: true,
+                key: Key::A,
+            },
+            HotkeyAction::Annotation,
+        );
 
         // Copy defaults to active shortcuts
         self.shortcuts = self.default_shortcuts.clone();
     }
 
     pub fn is_default(&self, combination: &KeyCombination, action: &HotkeyAction) -> bool {
-        self.default_shortcuts
-            .get(combination)
-            .map_or(false, |default_action| default_action == action)
+        self.default_shortcuts.get(combination) == Some(action)
     }
 
     pub fn handle_input(&mut self, ui: &egui::Context) -> Option<HotkeyAction> {
@@ -220,35 +227,37 @@ impl HotkeyManager {
 }
 
 impl std::fmt::Display for KeyCombination {
+    #[cfg(not(target_os = "macos"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if cfg!(target_os = "macos") {
-            let key_str = match self.key {
-                Key::Escape => "⎋".to_string(),
-                Key::Tab => "⇥".to_string(),
-                Key::Backspace => "⌫".to_string(),
-                Key::Enter => "↵".to_string(),
-                Key::Space => "Space".to_string(),
-                _ => format!("{:?}", self.key),
-            };
+        let key_str = format!("{:?}", self.key);
+        write!(
+            f,
+            "{}{}{}{}",
+            if self.ctrl { "Ctrl+" } else { "" },
+            if self.shift { "Shift+" } else { "" },
+            if self.alt { "Alt+" } else { "" },
+            key_str
+        )
+    }
 
-            write!(
-                f,
-                "{}{}{}{}",
-                if self.ctrl { "⌘+" } else { "" },
-                if self.shift { "⇧+" } else { "" },
-                if self.alt { "⌥+" } else { "" },
-                key_str
-            )
-        } else {
-            let key_str = format!("{:?}", self.key);
-            write!(
-                f,
-                "{}{}{}{}",
-                if self.ctrl { "Ctrl+" } else { "" },
-                if self.shift { "Shift+" } else { "" },
-                if self.alt { "Alt+" } else { "" },
-                key_str
-            )
-        }
+    #[cfg(target_os = "macos")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let key_str = match self.key {
+            Key::Escape => "⎋".to_string(),
+            Key::Tab => "⇥".to_string(),
+            Key::Backspace => "⌫".to_string(),
+            Key::Enter => "↵".to_string(),
+            Key::Space => "Space".to_string(),
+            _ => format!("{:?}", self.key),
+        };
+
+        write!(
+            f,
+            "{}{}{}{}",
+            if self.ctrl { "⌘+" } else { "" },
+            if self.shift { "⇧+" } else { "" },
+            if self.alt { "⌥+" } else { "" },
+            key_str
+        )
     }
 }

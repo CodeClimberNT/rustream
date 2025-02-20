@@ -1,6 +1,7 @@
 use crate::config::{AudioConfig, Config, VideoConfig};
 use crate::screen_capture::CapturedFrame;
 
+use log::{debug, error, info, warn};
 use std::time::{Duration, Instant};
 use std::{
     path::PathBuf,
@@ -11,7 +12,6 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
-use tracing::{debug, error, info, warn};
 
 use hound::{WavSpec, WavWriter};
 // use image::RgbaImage;

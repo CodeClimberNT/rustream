@@ -14,41 +14,37 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 // use std::time::Duration;
 
-use lazy_static::lazy_static;
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Pos2, Rect, RichText, TextStyle, TextureHandle, TopBottomPanel, Ui, Window
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextStyle, TextureHandle, TopBottomPanel, Ui, Window
 };
 
 use std::env;
 use std::process::Command;
 
 use display_info::DisplayInfo;
-use tracing::{debug, error, info, warn};
+use log::{debug, error, info};
 
-lazy_static! {
-    pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> =
-        Arc::new(Mutex::new(CaptureArea::default()));
-}
+
 
 
 pub struct RustreamApp {
     pub config: Arc<Mutex<Config>>,
+    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
+    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
     audio_capturer: AudioCapturer,
     video_recorder: VideoRecorder,
     page: PageView,                           // Enum to track modes
     display_texture: Option<TextureHandle>,   // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>, // List of textures
-    cropped_frame: Option<CapturedFrame>,     // Cropped image to send
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
     address_text: String,  
     caster_addr: Option<SocketAddr>,                   // Text input for the receiver mode
-    //preview_active: bool,
     streaming_active: bool,
     is_selecting: bool,
-    drag_start: Option<Pos2>,
+    cropped_frame: Option<CapturedFrame>,
     capture_area: Option<CaptureArea>,
     show_config: bool, // Add this field
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
@@ -56,13 +52,9 @@ pub struct RustreamApp {
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<tokio::sync::Mutex<Sender>>>>,
     receiver_rx: Option<tokio::sync::oneshot::Receiver<Receiver>>,
     socket_created: bool,
-    //frame_rx: Option<tokio::sync::oneshot::Receiver<CapturedFrame>>,
     last_frame_time: Option<std::time::Instant>,
     frame_times: std::collections::VecDeque<std::time::Duration>,
     current_fps: f32,
-    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
-    //frame_ready: bool,
-    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     is_receiving: bool,
     stop_task: Option<tokio::task::JoinHandle<()>>, // Handle to the stop task
     started_capture: bool,
@@ -70,6 +62,7 @@ pub struct RustreamApp {
     editing_hotkey: Option<HotkeyAction>,
     triggered_actions: Vec<HotkeyAction>,
     previous_monitor: usize,
+    is_address_valid: bool,
 }
 
 
@@ -118,14 +111,6 @@ pub enum PageView {
     Receiver,
 }
 
-#[derive(Debug, Clone)]
-struct MonitorInfo {
-    id: usize,
-    name: String,
-    position: (i32, i32),
-    
-}
-
 impl RustreamApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -169,14 +154,12 @@ impl RustreamApp {
             sender_rx: None,
             streaming_active: false,
             socket_created: false,
-            //frame_rx: None,
             receiver: None,
             receiver_rx: None,
             last_frame_time: None,
             frame_times: std::collections::VecDeque::with_capacity(60),
             current_fps: 0.0,
             received_frames: Arc::new(Mutex::new(VecDeque::new())),
-            //frame_ready: false,
             stop_notify: Arc::new(Notify::new()),
             is_receiving: false,
             captured_frames: Arc::new(Mutex::new(VecDeque::new())),
@@ -184,7 +167,6 @@ impl RustreamApp {
             hotkey_manager: HotkeyManager::new(),
             page: PageView::HomePage,
             display_texture: None,
-            cropped_frame: None,
             address_text: String::new(),
             is_selecting: false,
             capture_area: None,
@@ -193,8 +175,9 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            drag_start: None,
-            stop_task: None,            
+            cropped_frame: None,
+            stop_task: None,      
+            is_address_valid: true,      
         }
     }
 
@@ -255,16 +238,20 @@ impl RustreamApp {
 
                 ui.add_space(30.0);
                 if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
-                        )
-                        .min_size(egui::vec2(300.0, 60.0)),
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
                     )
-                    .clicked()
+                    .min_size(egui::vec2(300.0, 60.0)),
+                )
+                .clicked()
                 {
                     self.set_page(PageView::Receiver);
                 }
+                
+                ui.add_space(30.0);
+
+                
             });
         });
     }
@@ -287,17 +274,16 @@ impl RustreamApp {
                 // Manual capture area input
                 ui.heading("Capture Area");
                 ui.horizontal(|ui| {
-                    let mut area = GLOBAL_CAPTURE_AREA.lock().unwrap();
+                    let mut area = self.capture_area.unwrap_or_default();
                     //println!("this is the global variable: {:?}", *area);
 
                     ui.vertical(|ui| {
-                        // FIXME: X=0 value error
                         ui.label("X:");
                         let mut x_str = area.x.to_string();
                         if ui.text_edit_singleline(&mut x_str).changed() {
                             if let Ok(x) = x_str.parse() {
                                 area.x = x;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
 
@@ -306,7 +292,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut y_str).changed() {
                             if let Ok(y) = y_str.parse() {
                                 area.y = y;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
                     });
@@ -317,7 +303,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut width_str).changed() {
                             if let Ok(width) = width_str.parse() {
                                 area.width = width;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
 
@@ -326,7 +312,7 @@ impl RustreamApp {
                         if ui.text_edit_singleline(&mut height_str).changed() {
                             if let Ok(height) = height_str.parse() {
                                 area.height = height;
-                                self.capture_area = Some(*area);
+                                self.capture_area = Some(area);
                             }
                         }
                     });
@@ -377,9 +363,9 @@ impl RustreamApp {
                             std::process::exit(1);
                         });
                         //display name + x and y
-                        println!("[INFO] Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
+                        info!("Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
                         let output = Command::new(env::current_exe().unwrap())
-                        .arg("--secondary")
+                        .arg("--overlay:selection")
                         .arg(display.x.to_string())
                         .arg(display.y.to_string())
                         .arg(display.width.to_string())
@@ -654,6 +640,7 @@ impl RustreamApp {
         ui.heading("Monitor Feedback");
         ui.separator();
         ui.vertical_centered(|ui| {
+        //TODO: add toggle preview to save resources 
             ui.horizontal(|ui| {
                 if self.action_button(
                     ui,
@@ -662,15 +649,38 @@ impl RustreamApp {
                     } else {
                         "Start Streaming"
                     },
-                    HotkeyAction::TogglePreview, //FIXME: Streaming action
+                    HotkeyAction::ToggleStreaming, 
                 ) {
                     self.streaming_active = !self.streaming_active;
+                }
+                
+                if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
+                   let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
+                    let displays = DisplayInfo::all().unwrap_or_default();
+                    //info!("Displays: {:?}", displays);
+                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
+                        error!("Monitor not found: {}", selected_monitor);
+                        std::process::exit(1);
+                    });
+
+                    #[allow(unused_must_use)]
+                    Command::new(env::current_exe().unwrap())
+                    .arg("--overlay:annotation")
+                    .arg(display.x.to_string())
+                    .arg(display.y.to_string())
+                    .arg(display.width.to_string())
+                    .arg(display.height.to_string())
+                    .arg(display.scale_factor.to_string())
+                    .spawn();
                 }
 
                 if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
                     self.show_config = true;
                 }
                 self.render_recording_controls(ui);
+                ui.add_space(50.0);
+
+                
             });
         });
 
@@ -678,7 +688,7 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            //modificare qui, metere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
+            //modificare qui, mettere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
             //poi metto il frame catturato in un mutex e l'ui lo prenderà da lì
             
             let cap_frames = self.captured_frames.clone();
@@ -688,7 +698,8 @@ impl RustreamApp {
             
             if !self.started_capture { //call capture_frame only once
                 self.started_capture = true;
-                self.frame_grabber.capture_frame(cap_frames, self.capture_area);
+                //FIXME: capture area need to be sent across thread
+                self.frame_grabber.capture_frame(cap_frames);
             }
             
             let mut frames = self.captured_frames.lock().unwrap();
@@ -761,20 +772,20 @@ impl RustreamApp {
                                 .view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
                         {
                             egui::ColorImage::from_rgba_unmultiplied(
-                                [cropped.width as usize, cropped.height as usize],
+                                [cropped.width, cropped.height ],
                                 &cropped.rgba_data, // Changed from frame_data to rgba_data
                             )
                         } else {
                             // Fallback to full image if crop parameters are invalid
                             egui::ColorImage::from_rgba_unmultiplied(
-                                [display_frame.width as usize, display_frame.height as usize],
+                                [display_frame.width, display_frame.height],
                                 &display_frame.rgba_data, // Changed from frame_data to rgba_data
                             )
                         }
                     } else {
                         // No crop area selected, show full image
                         egui::ColorImage::from_rgba_unmultiplied(
-                            [display_frame.width as usize, display_frame.height as usize],
+                            [display_frame.width, display_frame.height ],
                             &display_frame.rgba_data, // Changed from frame_data to rgba_data
                         )
                     };
@@ -861,6 +872,7 @@ impl RustreamApp {
 
                                 //check if inserted address is valid
                                 if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                                    self.is_address_valid = true;
                                     let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
                                     self.caster_addr = Some(caster_addr); 
 
@@ -944,11 +956,12 @@ impl RustreamApp {
                                         Err(_) => println!("the sender dropped or no data received"),
                                     }*/
                                     self.is_receiving = true;
+                                } else{
+                                    self.is_address_valid = false;
                                 }
-                                else {
-                                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                                    //come faccio a farla comparire per più tempo?? scompare in un secondo
-                                }
+
+
+                                
 
                                 /*// Add a loading indicator while waiting for receiver initialization
                                 if self.socket_created && self.receiver.is_none() {
@@ -1008,9 +1021,13 @@ impl RustreamApp {
                                     ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
                                 }*/    
                             }
-
+                            
                             
                         });
+                        if !self.is_address_valid {
+                            ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
+                            //come faccio a farla comparire per più tempo?? scompare in un secondo
+                        }
                     //});
                 } else {
 
@@ -1253,9 +1270,6 @@ impl RustreamApp {
 
 
     fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {
-        // Check if Alt is pressed for underline
-        let alt_pressed = ui.input(|i| i.modifiers.alt);
-
         // Get hotkey text if exists
         let hotkey_text = format!(
             " ({})",
@@ -1263,13 +1277,10 @@ impl RustreamApp {
                 .get_shortcut_text(&action)
                 .unwrap_or_default()
         );
-
-        // Create full text for size calculation
-        let full_text = format!("{}{}", label, hotkey_text);
-
-        // Calculate size with padding
+    
+        // Calculate size with padding for the label only
         let galley = ui.painter().layout_no_wrap(
-            full_text.clone(),
+            label.to_string(),
             egui::TextStyle::Button.resolve(ui.style()),
             egui::Color32::PLACEHOLDER,
         );
@@ -1278,18 +1289,16 @@ impl RustreamApp {
             galley.size().x + padding.x * 2.0,
             galley.size().y + padding.y * 2.0,
         );
+        
+    
+        // Create button with fixed minimum size and hover text
+        let response = ui.add_sized(
+            min_size,
+            egui::Button::new(label.to_string())
+        ).on_hover_text(format!("{}{}", label, hotkey_text));
+    
 
-        // Create displayed text (with or without hotkey)
-        let display_text = if alt_pressed {
-            full_text
-        } else {
-            label.to_string()
-        };
-
-        // Create button with fixed minimum size
-        ui.add_sized(min_size, egui::Button::new(display_text))
-            .clicked()
-            || self.triggered_actions.contains(&action)
+        response.clicked() || self.triggered_actions.contains(&action)
     }
 
     fn clickable_element<T>(

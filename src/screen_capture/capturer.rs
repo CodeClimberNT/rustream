@@ -1,13 +1,13 @@
 use super::{CaptureArea, CapturedFrame};
 use crate::config::Config;
 use image::{ImageBuffer, RgbaImage};
+use log::{debug, error, warn};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
     thread,
 };
-use tracing::{debug, error, info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
@@ -73,6 +73,7 @@ impl ScreenCapture {
             self.height = monitor.height();
             self.width = monitor.width();
             debug!("Monitor dimensions: {}x{}", self.width, self.height);
+            debug!("Monitor dimensions: {}x{}", self.width, self.height);
 
             self.capturer = match Capturer::new(monitor) {
                 Ok(cap) => Some(cap),
@@ -95,6 +96,7 @@ impl ScreenCapture {
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
                     debug!("Frame not ready; skipping this frame.");
+                    debug!("Frame not ready; skipping this frame.");
                     None
                 }
                 _ => {
@@ -109,11 +111,7 @@ impl ScreenCapture {
         }
     }
 
-    pub fn capture_frame(
-        &self,
-        captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
-        capture_area: Option<CaptureArea>,
-    ) {
+    pub fn capture_frame(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
         //-> Option<CapturedFrame>  tx: mpsc::SyncSender<CapturedFrame>
 
         //if self.capturer.is_none() {
@@ -182,22 +180,24 @@ impl ScreenCapture {
                             // )
                             // .expect("Couldn't create image buffer from raw frame");
 
-                            let img_buffer: RgbaImage =
-                                ImageBuffer::from_raw(current_dimensions.0, current_dimensions.1, raw_frame.to_vec())
-                                    .expect("Couldn't create image buffer from raw frame");
+                            let img_buffer: RgbaImage = ImageBuffer::from_raw(
+                                current_dimensions.0,
+                                current_dimensions.1,
+                                raw_frame.to_vec(),
+                            )
+                            .expect("Couldn't create image buffer from raw frame");
 
                             let rgba_img = CapturedFrame::from_bgra(
-                                current_dimensions.0, 
-                                current_dimensions.1, 
-                                img_buffer
+                                current_dimensions.0,
+                                current_dimensions.1,
+                                img_buffer,
                             );
 
-                            let mut cap_frames = captured_frames.lock().unwrap();
-                            cap_frames.push_back(rgba_img);
-                            /*if let Err(e) = tx.send(rgba_img) {
-                                println!("Failed to send captured frame: {}", e);
-                            }*/
+                            let mut frames = captured_frames.lock().unwrap();
+
+                            frames.push_back(rgba_img);
                         }
+
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
                                 debug!("Frame not ready; skipping this frame.");

@@ -3,11 +3,11 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Stream, StreamConfig,
 };
+use log::error;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tracing::{debug, error, info, warn};
 
 // pub struct AudioStream {
 //     buffer: RingBuffer<f32>,

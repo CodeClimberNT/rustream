@@ -1,11 +1,11 @@
 use super::{BgraBuffer, CaptureArea, RgbaBuffer};
 // use image::{ImageBuffer, RgbaImage};
-use image::{GenericImageView,ImageBuffer, RgbaImage};
+use image::{GenericImageView, ImageBuffer, RgbaImage};
+use log::debug;
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tracing::debug;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
@@ -129,7 +129,7 @@ impl CapturedFrame {
             rgba_data: buffer_rgba,
         }
     }
-    
+
     pub fn from_bgra(width: u32, height: u32, mut bgra_buffer: RgbaImage) -> Self {
         // Convert BGRA to RGBA immediately
         for chunk in bgra_buffer.chunks_exact_mut(4) {
@@ -143,8 +143,9 @@ impl CapturedFrame {
     }
 
     pub fn view(self, x: u32, y: u32, view_width: u32, view_height: u32) -> Option<Self> {
-        let image_view: RgbaImage = ImageBuffer::from_vec(self.width as u32, self.height as u32, self.rgba_data)
-            .expect("Couldn't create image buffer from raw frame");
+        let image_view: RgbaImage =
+            ImageBuffer::from_vec(self.width as u32, self.height as u32, self.rgba_data)
+                .expect("Couldn't create image buffer from raw frame");
 
         let cropped_image: Vec<u8> = image_view
             .view(x, y, view_width, view_height)
@@ -159,38 +160,45 @@ impl CapturedFrame {
     }
 
     pub fn encode_to_h265(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let platform = env::consts::OS; //detect OS
+        // let platform = env::consts::OS; //detect OS
 
-        let (gpu_acceleration, encoder) = match platform {
-            "linux" =>
-            // On Linux, prefer VAAPI (works with Intel/AMD)
-            {
-                (["-hwaccel", "vaapi"], ["-c:v", "hevc_vaapi"])
-            }
-            "windows" =>
-            // On Windows, use CUDA/NVENC (for NVIDIA GPUs)
-            {
-                (["-hwaccel", "cuda"], ["-c:v", "hevc_cuda"])
-            }
-            "macos" =>
-            // On macOS, you might rely on software decoding or choose available hardware (e.g., use VideoToolbox)
-            {
-                (["-hwaccel", "videotoolbox"], ["-c:v", "hevc_videotoolbox"])
-            }
-            _ => (["", ""], ["-c:v", "hevc"]),
-        };
+        // let (gpu_acceleration, encoder) = match platform {
+        //     "linux" =>
+        //     // On Linux, prefer VAAPI (works with Intel/AMD)
+        //     {
+        //         (["-hwaccel", "vaapi"], ["-c:v", "hevc_vaapi"])
+        //     }
+        //     "windows" =>
+        //     // On Windows, use CUDA/NVENC (for NVIDIA GPUs)
+        //     {
+        //         (["-hwaccel", "cuda"], ["-c:v", "hevc_cuda"])
+        //     }
+        //     "macos" =>
+        //     // On macOS, you might rely on software decoding or choose available hardware (e.g., use VideoToolbox)
+        //     {
+        //         (["-hwaccel", "videotoolbox"], ["-c:v", "hevc_videotoolbox"])
+        //     }
+        //     _ => (["", ""], ["-c:v", "hevc"]),
+        // };
 
         let mut ffmpeg = Command::new("ffmpeg")
             .args([
                 //gpu_acceleration[0], gpu_acceleration[1],
-                "-f", "rawvideo", // input is raw video
-                "-pixel_format", "rgba",
-                "-video_size", &format!("{}x{}", self.width, self.height),
-                "-i", "-", // input from stdin
-                "-c:v", "libx265", // Codec H.265
+                "-f",
+                "rawvideo", // input is raw video
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                &format!("{}x{}", self.width, self.height),
+                "-i",
+                "-", // input from stdin
+                "-c:v",
+                "libx265", // Codec H.265
                 //encoder[0], encoder[1],
-                "-preset", "ultrafast",
-                "-f", "rawvideo", // output raw
+                "-preset",
+                "ultrafast",
+                "-f",
+                "rawvideo", // output raw
                 "-",        // output to stdout
             ])
             .stdin(Stdio::piped())
@@ -209,6 +217,7 @@ impl CapturedFrame {
 
         Ok(output.stdout)
     }
+
     pub fn save(&self, path: &PathBuf) -> Result<(), image::ImageError> {
         let image: RgbaImage = image::ImageBuffer::from_raw(
             self.width as u32,
