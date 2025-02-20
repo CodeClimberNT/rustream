@@ -1,8 +1,9 @@
+
+use crate::common::CaptureArea;
 use eframe::egui::{self, CentralPanel, Color32, Pos2, Rect};
+use egui::StrokeKind;
 use serde_json::json;
 use std::io::Write;
-use crate::common::CaptureArea;
-
 
 #[derive(Default)]
 pub struct SecondaryApp {
@@ -37,7 +38,7 @@ impl eframe::App for SecondaryApp {
         egui::Window::new("Tutorial")
             .fixed_pos([10.0, 10.0])
             .title_bar(false)
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180)))
+            .frame(egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180)))
             .show(ctx, |ui| {
                 ui.colored_label(
                     egui::Color32::WHITE,
@@ -50,7 +51,7 @@ impl eframe::App for SecondaryApp {
             });
 
         CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
+            .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 let response =
                     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
@@ -88,6 +89,7 @@ impl eframe::App for SecondaryApp {
                             3.0,
                             egui::Color32::from_rgba_unmultiplied(0, 255, 0, 128),
                         ),
+                        StrokeKind::Outside,
                     );
 
                     if response.drag_stopped() {

@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
@@ -71,12 +72,12 @@ impl ScreenCapture {
 
             self.height = monitor.height();
             self.width = monitor.width();
-            log::debug!("Monitor dimensions: {}x{}", self.width, self.height);
+            debug!("Monitor dimensions: {}x{}", self.width, self.height);
 
             self.capturer = match Capturer::new(monitor) {
                 Ok(cap) => Some(cap),
                 Err(e) => {
-                    log::error!("{}", CaptureError::InitError(e.to_string()));
+                    error!("{}", CaptureError::InitError(e.to_string()));
                     return None;
                 }
             };
@@ -93,11 +94,11 @@ impl ScreenCapture {
             )),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
-                    log::debug!("Frame not ready; skipping this frame.");
+                    debug!("Frame not ready; skipping this frame.");
                     None
                 }
                 _ => {
-                    log::error!(
+                    error!(
                         r"Strange Error: {e}.
                         Resetting capturer."
                     );
@@ -145,7 +146,7 @@ impl ScreenCapture {
                     let monitor = match get_monitor_from_index(new_monitor_index) {
                         Ok(m) => m,
                         Err(_) => {
-                            log::error!("Failed to get monitor with index {}", new_monitor_index);
+                            error!("Failed to get monitor with index {}", new_monitor_index);
                             thread::sleep(std::time::Duration::from_secs(1));
                             return;
                         }
@@ -154,7 +155,7 @@ impl ScreenCapture {
                     let width = monitor.width() as u32;
                     let height = monitor.height() as u32;
 
-                    log::debug!("Monitor dimensions: {}x{}", width, height,);
+                    debug!("Monitor dimensions: {}x{}", width, height,);
 
                     match Capturer::new(monitor) {
                         Ok(c) => {
@@ -163,7 +164,7 @@ impl ScreenCapture {
                             current_dimensions = (width, height);
                         }
                         Err(e) => {
-                            log::error!("Failed to initialize Capturer: {:?}", e);
+                            error!("Failed to initialize Capturer: {:?}", e);
                             thread::sleep(std::time::Duration::from_millis(100));
                             return;
                         }
@@ -181,11 +182,14 @@ impl ScreenCapture {
                             // )
                             // .expect("Couldn't create image buffer from raw frame");
 
-                            let rgba_img = CapturedFrame::from_bgra_buffer(
-                                raw_frame.to_vec(),
-                                current_dimensions.0 as usize,
-                                current_dimensions.1 as usize,
-                                capture_area,
+                            let img_buffer: RgbaImage =
+                                ImageBuffer::from_raw(current_dimensions.0, current_dimensions.1, raw_frame.to_vec())
+                                    .expect("Couldn't create image buffer from raw frame");
+
+                            let rgba_img = CapturedFrame::from_bgra(
+                                current_dimensions.0, 
+                                current_dimensions.1, 
+                                img_buffer
                             );
 
                             let mut cap_frames = captured_frames.lock().unwrap();
@@ -196,10 +200,10 @@ impl ScreenCapture {
                         }
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
-                                log::debug!("Frame not ready; skipping this frame.");
+                                debug!("Frame not ready; skipping this frame.");
                             }
                             std::io::ErrorKind::ConnectionReset => {
-                                log::error!(
+                                error!(
                                     r"Strange Error: {e}.
                                     Resetting capturer.
                                     Make sure that if you changed your screen size, keep it at 16:9 ratio."
@@ -207,86 +211,12 @@ impl ScreenCapture {
                                 capturer = None; // Force reinitialization on next iteration
                             }
                             _ => {
-                                log::error!("What did just happen? {e:?}");
+                                error!("What did just happen? {e:?}");
                                 capturer = None; // Force reinitialization on next iteration
                             }
                         },
                     }
                 }
-
-                // versione di prima
-                /*if no_capturer{
-                    let conf_lock = config.lock().unwrap();
-                    let monitor =
-                    get_monitor_from_index(conf_lock.capture.selected_monitor).unwrap();
-                    drop(conf_lock);
-                    let height = monitor.height() as u32;
-                    let width = monitor.width() as u32;
-                    //self.height = monitor.height() as u32;
-                    //self.width = monitor.width() as u32;
-                    // self.stride = monitor.width() as usize * 4; // Basic stride calculation
-                    // if self.stride % 16 != 0 {
-                    //     // Align to 16 bytes
-                    //     self.stride = (self.stride + 15) & !15;
-                    // }
-                    log::debug!(
-                        "Monitor dimensions: {}x{}",
-                        width,
-                        height,
-                        // self.stride
-                    );
-
-                    let mut capturer = match Capturer::new(monitor) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            log::error!("Failed to initialize Capturer: {:?}, Error details: {:?}", e, e.to_string());
-                            return;
-                        }
-                    };
-                }
-                    match capturer.frame() {
-                        Ok(raw_frame) => {
-                            // Create new buffer with correct size
-                            // let mut img_buffer: ImageBuffer<_, Vec<_>> =
-                            //     ImageBuffer::new(self.width, self.height);
-
-                            // Copy each row, skipping the stride padding
-                            // for y in 0..self.height as usize {
-                            //     let start = y * self.stride;
-                            //     let end = start + (self.width as usize * 4);
-                            //     img_buffer.extend_from_slice(&raw_frame[start..end]);
-                            // }
-
-                            let img_buffer: RgbaImage =
-                                ImageBuffer::from_raw(width, height, raw_frame.to_vec())
-                                    .expect("Couldn't create image buffer from raw frame");
-
-                            let rgba_img = CapturedFrame::from_bgra(width, height, img_buffer);
-
-                            let mut cap_frames = captured_frames.lock().unwrap();
-                            cap_frames.push_back(rgba_img);
-                            //Some(rgba_img)
-                        }
-                        Err(e) => match e.kind() {
-                            std::io::ErrorKind::WouldBlock => {
-                                log::debug!("Frame not ready; skipping this frame.");
-                                //None
-                            }
-                            std::io::ErrorKind::ConnectionReset => {
-                                log::error!(
-                                    r"Strange Error: {e}.
-                                    Resetting capturer.
-                                    Make sure that if you changed your screen size, keep it at 16:9 ratio."
-                                );
-                                //self.reset_capture(); //come lo implemento senza usare cose nel self?
-                                //None
-                            }
-                            _ => {
-                                log::error!("What did just happen? {e:?}");
-                                //None
-                            }
-                        },
-                    }*/
                 thread::sleep(std::time::Duration::from_millis(1000 / 40));
             }
         });

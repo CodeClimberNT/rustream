@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
 
@@ -107,15 +107,17 @@ impl Sender {
             println!("No receivers connected");
             return Ok(()); // Return early if no receivers
         }
-
+        let start = Instant::now();
         let encoded_frame = frame.encode_to_h265()?;
+        let encode_time = start.elapsed();
+        println!("Encoding time: {:?}", encode_time);
         println!("Frame encoded to h265");
 
         //loop {
 
         let mut fid = frame_id.lock().await;
         *fid += 1;
-        println!("Frame id modified in: {:?}", *fid);
+        println!("Frame id: {:?}", *fid);
         let mut seq_num: u16 = 0;
         //encoded_frame size = num elements (len()) * size of element (u8)[1 byte]
         let total_chunks = (encoded_frame.len() as f32
@@ -352,7 +354,10 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
         //if let Some(frame) = frames.pop_front() {
             //println!("Frame received in process_frame");
             //drop(frames);
+            let start = Instant::now();
             let decoded_frame = decode_from_h265_to_rgba(frame);
+            let dencode_time = start.elapsed();
+            println!("Dencoding time: {:?}", dencode_time);
             match decoded_frame {
                 Ok(frame) => {
                     let mut frames = frames_vec.lock().unwrap();
@@ -508,7 +513,7 @@ pub async fn start_receiving(
                     
                     tokio::spawn(async move {
                 
-                        println!("Calling process_frame");
+                        //println!("Calling process_frame");
                         process_frame(frames_vec1, frame).await;
                         // frames_vec is the vector of frames to share with ui
                     
@@ -586,7 +591,7 @@ fn decode_from_h265_to_rgba(
         eprintln!("FFmpeg error: {}", stderr);
         return Err(format!("FFmpeg encoding failed: {}", stderr).into());
     }
-    println!("Frame decoded to rgba");
+    //println!("Frame decoded to rgba");
 
     let rgba_data = output.stdout;
     //println!("Decoded RGBA size: {}", rgba_data.len());
@@ -605,16 +610,11 @@ fn get_h265_dimensions(
 ) -> Result<(u32, u32), Box<dyn std::error::Error + Send + Sync>> {
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
-            "-f",
-            "hevc",
-            "-i",
-            "pipe:0",
-            "-vframes",
-            "1", // Process only first frame
-            "-vf",
-            "scale=iw:ih", // Force scale filter to report size
-            "-f",
-            "null",
+            "-f", "hevc",
+            "-i", "pipe:0",
+            "-vframes", "1", // Process only first frame
+            "-vf", "scale=iw:ih", // Force scale filter to report size
+            "-f", "null",
             "-",
         ])
         .stdin(Stdio::piped())

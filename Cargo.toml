@@ -12,21 +12,21 @@
 
 [dependencies]
     # UI, (wgpu use gfx to create a HAL: https://github.com/gfx-rs/gfx#hardware-abstraction-layer)
-    egui = { version = "0.30.0", features = [
+    egui = { version = "0.31.0", features = [
         "bytemuck",
         # Enable to debug if the app freezes
         "deadlock_detection",
         "default_fonts",
         "serde",
     ], default-features = false }
-    eframe = { version = "0.30.0", features = [
+    eframe = { version = "0.31.0", features = [
         "__screenshot",
         "serde",
         "wgpu",
         "x11",
         "glow",
     ], default-features = false }
-    egui_extras = { version = "0.30.0", features = [
+    egui_extras = { version = "0.31.0", features = [
         "serde",
         "svg",
     ], default-features = false }
@@ -38,7 +38,7 @@
     ], default-features = false }
 
     # File System Utilities
-    dirs = { version = "5.0.1", default-features = false }
+    dirs = { version = "6.0.0", default-features = false }
 
     # Audio Processing
     cpal = { version = "0.15.3", default-features = false }
@@ -46,9 +46,12 @@
     hound = { version = "3.5.1", default-features = false }
 
     # Utilities
-    log = { version = "0.4.22", default-features = false }
-    env_logger = { version = "0.11.6", default-features = false }
-    thiserror = { version = "2.0.9", default-features = false }
+    # log = { version = "0.4.22", default-features = false }
+    # env_logger = { version = "0.11.6", default-features = false }
+    tracing = { version = "0.1", features = ["attributes"] }
+    tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+    thiserror = { version = "2.0.11", default-features = false }
     lazy_static = { version = "1.5.0", default-features = false }
 
 
@@ -56,10 +59,10 @@
         "xdg-portal",
     ], default-features = false }
 
-    serde = { version = "1.0.217", features = [
+    serde = { version = "1.0.218", features = [
         "derive",
     ], default-features = false }
-    serde_json = { version = "1.0.134", features = [
+    serde_json = { version = "1.0.139", features = [
         "std",
     ], default-features = false }
 
@@ -68,6 +71,7 @@
     # Decoding
     regex = "1.5"
     tokio = { version = "1.42.0", features = ["full"] }
+
 
 [profile.dev]
     opt-level = 1

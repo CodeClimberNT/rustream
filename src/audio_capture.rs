@@ -7,6 +7,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use tracing::{debug, error, info, warn};
 
 // pub struct AudioStream {
 //     buffer: RingBuffer<f32>,
@@ -76,7 +77,7 @@ impl AudioCapturer {
                         }
                     }
                 },
-                move |err| log::error!("Audio stream error: {}", err),
+                move |err| error!("Audio stream error: {}", err),
                 None,
             )
             .map_err(|e| e.to_string())?;

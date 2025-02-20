@@ -1,15 +1,17 @@
 use super::{BgraBuffer, CaptureArea, RgbaBuffer};
-use image::{ImageBuffer, RgbaImage};
+// use image::{ImageBuffer, RgbaImage};
+use image::{GenericImageView,ImageBuffer, RgbaImage};
 use std::env;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use tracing::debug;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
     pub width: usize,
     pub height: usize,
-    pub rgba_data: Arc<RgbaImage>,
+    pub rgba_data: Vec<u8>,
 }
 
 impl CapturedFrame {
@@ -42,13 +44,10 @@ impl CapturedFrame {
         crop_area: CaptureArea,
     ) -> (RgbaBuffer, usize, usize) {
         // Debug input values
-        log::debug!("Initial buffer: {}x{}", buffer_width, buffer_height);
-        log::debug!(
+        debug!("Initial buffer: {}x{}", buffer_width, buffer_height);
+        debug!(
             "Requested crop: x={}, y={}, w={}, h={}",
-            crop_area.x,
-            crop_area.y,
-            crop_area.width,
-            crop_area.height
+            crop_area.x, crop_area.y, crop_area.width, crop_area.height
         );
 
         // Ensure crop coordinates are within bounds
@@ -66,7 +65,7 @@ impl CapturedFrame {
             buffer_height,
         );
 
-        log::debug!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
+        debug!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
 
         // Allocate output buffer
         let mut rgba_data = vec![0u8; width * height * 4];
@@ -91,7 +90,7 @@ impl CapturedFrame {
             }
         }
 
-        log::debug!("Output buffer: {}x{}", width, height);
+        debug!("Output buffer: {}x{}", width, height);
         (rgba_data, width, height)
     }
 
@@ -112,14 +111,10 @@ impl CapturedFrame {
             }
         };
 
-        // Create an ImageBuffer from the processed data
-        let image: RgbaImage =
-            ImageBuffer::from_vec(final_width as u32, final_height as u32, rgba_data)
-                .expect("Failed to create image from buffer");
         Self {
             width: final_width,
             height: final_height,
-            rgba_data: Arc::new(image),
+            rgba_data,
         }
     }
 
@@ -128,16 +123,41 @@ impl CapturedFrame {
         buffer_width: usize,
         buffer_height: usize,
     ) -> Self {
-        // Create an ImageBuffer from the processed data
-        let image: RgbaImage =
-            ImageBuffer::from_vec(buffer_width as u32, buffer_height as u32, buffer_rgba)
-                .expect("Failed to create image from buffer");
         Self {
             width: buffer_width,
             height: buffer_height,
-            rgba_data: Arc::new(image),
+            rgba_data: buffer_rgba,
         }
     }
+    
+    pub fn from_bgra(width: u32, height: u32, mut bgra_buffer: RgbaImage) -> Self {
+        // Convert BGRA to RGBA immediately
+        for chunk in bgra_buffer.chunks_exact_mut(4) {
+            chunk.swap(0, 2); // Swap B and R
+        }
+        Self {
+            width: width as usize,
+            height: height as usize,
+            rgba_data: bgra_buffer.to_vec(),
+        }
+    }
+
+    pub fn view(self, x: u32, y: u32, view_width: u32, view_height: u32) -> Option<Self> {
+        let image_view: RgbaImage = ImageBuffer::from_vec(self.width as u32, self.height as u32, self.rgba_data)
+            .expect("Couldn't create image buffer from raw frame");
+
+        let cropped_image: Vec<u8> = image_view
+            .view(x, y, view_width, view_height)
+            .to_image()
+            .to_vec();
+
+        Some(Self {
+            width: view_width as usize,
+            height: view_height as usize,
+            rgba_data: cropped_image,
+        })
+    }
+
     pub fn encode_to_h265(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let platform = env::consts::OS; //detect OS
 
@@ -163,21 +183,14 @@ impl CapturedFrame {
         let mut ffmpeg = Command::new("ffmpeg")
             .args([
                 //gpu_acceleration[0], gpu_acceleration[1],
-                "-f",
-                "rawvideo", // input is raw video
-                "-pixel_format",
-                "rgba",
-                "-video_size",
-                &format!("{}x{}", self.width, self.height),
-                "-i",
-                "-", // input from stdin
-                "-c:v",
-                "libx265", // Codec H.265
+                "-f", "rawvideo", // input is raw video
+                "-pixel_format", "rgba",
+                "-video_size", &format!("{}x{}", self.width, self.height),
+                "-i", "-", // input from stdin
+                "-c:v", "libx265", // Codec H.265
                 //encoder[0], encoder[1],
-                "-preset",
-                "ultrafast",
-                "-f",
-                "rawvideo", // output raw
+                "-preset", "ultrafast",
+                "-f", "rawvideo", // output raw
                 "-",        // output to stdout
             ])
             .stdin(Stdio::piped())
@@ -188,12 +201,22 @@ impl CapturedFrame {
         // write RGBA data in stdin
         ffmpeg.stdin.as_mut().unwrap().write_all(&self.rgba_data)?;
 
-        // read H.264 encoded data from stdout
+        // read H.265 encoded data from stdout
         let output = ffmpeg.wait_with_output()?;
         if !output.status.success() {
             return Err("FFmpeg encoding failed".into());
         }
 
         Ok(output.stdout)
+    }
+    pub fn save(&self, path: &PathBuf) -> Result<(), image::ImageError> {
+        let image: RgbaImage = image::ImageBuffer::from_raw(
+            self.width as u32,
+            self.height as u32,
+            self.rgba_data.clone(),
+        )
+        .expect("Failed to create image buffer");
+
+        image.save(path)
     }
 }
