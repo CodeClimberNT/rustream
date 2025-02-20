@@ -21,6 +21,11 @@ enum Shape {
         points: Vec<Pos2>,
         color: Color32,
     },
+    Text {
+        position: Pos2,
+        content: String,
+        color: Color32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -30,6 +35,7 @@ enum Tool {
     Circle,
     Arrow,
     FreeHand,
+    Text,
 }
 
 pub struct AnnotationApp {
@@ -41,6 +47,9 @@ pub struct AnnotationApp {
     free_hand_points: Vec<Pos2>,
     current_color: Color32,
     show_tutorial: bool,
+    show_text_input: bool,
+    temp_text: String,
+    text_position: Option<Pos2>,
 }
 
 impl Default for AnnotationApp {
@@ -54,6 +63,9 @@ impl Default for AnnotationApp {
             free_hand_points: Vec::new(),
             current_color: Color32::from_rgba_unmultiplied(255, 0, 0, 255),
             show_tutorial: false,
+            show_text_input: false,
+            temp_text: String::new(),
+            text_position: None,
         }
     }
 }
@@ -86,7 +98,7 @@ impl eframe::App for AnnotationApp {
                     self.current_tool = Tool::Circle;
                 }
                 if ui
-                    .selectable_label(self.current_tool == Tool::Arrow, "-> Arrow") //FIXME: find better arrow icon
+                    .selectable_label(self.current_tool == Tool::Arrow, "-> Arrow")
                     .clicked()
                 {
                     self.current_tool = Tool::Arrow;
@@ -97,6 +109,13 @@ impl eframe::App for AnnotationApp {
                 {
                     self.current_tool = Tool::FreeHand;
                 }
+                if ui
+                    .selectable_label(self.current_tool == Tool::Text, "T Text")
+                    .clicked()
+                {
+                    self.current_tool = Tool::Text;
+                }
+
                 ui.separator();
 
                 // Color picker
@@ -212,8 +231,41 @@ impl eframe::App for AnnotationApp {
                                     color: self.current_color,
                                 });
                             }
+                            Tool::Text => {
+                                if !self.show_text_input && response.clicked() {
+                                    if let Some(pos) = pointer_pos {
+                                        self.show_text_input = true;
+                                        self.text_position = Some(pos);
+                                        self.temp_text.clear();
+                                    }
+                                }
+                            }
                         }
                     }
+                }
+
+                if self.show_text_input {
+                    egui::Window::new("Add Text")
+                        .collapsible(false)
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            ui.text_edit_singleline(&mut self.temp_text);
+                            ui.horizontal(|ui| {
+                                if ui.button("OK").clicked() && !self.temp_text.is_empty() {
+                                    if let Some(pos) = self.text_position {
+                                        self.annotations.push(Shape::Text {
+                                            position: pos,
+                                            content: self.temp_text.clone(),
+                                            color: self.current_color,
+                                        });
+                                    }
+                                    self.show_text_input = false;
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.show_text_input = false;
+                                }
+                            });
+                        });
                 }
 
                 // Handle drawing end
@@ -288,6 +340,20 @@ impl AnnotationApp {
                         }
                     }
                 }
+            }
+            Shape::Text {
+                position,
+                content,
+                color,
+            } => {
+                let display_pos = egui::pos2(position.x / scale_factor, position.y / scale_factor);
+                ui.painter().text(
+                    display_pos,
+                    egui::Align2::LEFT_TOP,
+                    content,
+                    egui::FontId::proportional(16.0),
+                    *color,
+                );
             }
         }
     }

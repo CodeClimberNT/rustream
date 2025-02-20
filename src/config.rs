@@ -6,14 +6,12 @@ use std::path::PathBuf;
 pub struct Config {
     pub video: VideoConfig,
     pub capture: CaptureConfig,
-    pub audio: AudioConfig,
 }
 
 impl Config {
     pub fn update(&mut self, new_config: Config) {
         self.video = new_config.video;
         self.capture = new_config.capture;
-        self.audio = new_config.audio;
     }
 }
 
@@ -53,23 +51,4 @@ impl Default for VideoConfig {
 pub struct CaptureConfig {
     pub selected_monitor: usize,
     pub capture_area: Option<CaptureArea>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AudioConfig {
-    pub enabled: bool,
-    pub sample_rate: u32,
-    pub channels: u16,
-    pub volume: f32,
-}
-
-impl Default for AudioConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            sample_rate: 48000,
-            channels: 1,
-            volume: 1.0,
-        }
-    }
 }

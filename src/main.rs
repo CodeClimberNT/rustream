@@ -5,7 +5,6 @@ use std::env;
 mod annotation;
 mod app;
 mod area_capture;
-mod audio_capture;
 mod common;
 mod config;
 mod data_streaming;

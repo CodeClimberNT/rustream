@@ -40,11 +40,6 @@
     # File System Utilities
     dirs = { version = "6.0.0", default-features = false }
 
-    # Audio Processing
-    cpal = { version = "0.15.3", default-features = false }
-    opus = { version = "0.3.0", default-features = false }
-    hound = { version = "3.5.1", default-features = false }
-
     # Utilities
     log = { version = "0.4.22", default-features = false }
     env_logger = { version = "0.11.6", default-features = false }

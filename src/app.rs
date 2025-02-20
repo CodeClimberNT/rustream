@@ -1,4 +1,3 @@
-use crate::audio_capture::AudioCapturer;
 use crate::common::CaptureArea;
 use crate::config::Config;
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
@@ -34,7 +33,6 @@ pub struct RustreamApp {
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
     pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
-    audio_capturer: AudioCapturer,
     video_recorder: VideoRecorder,
     page: PageView,                           // Enum to track modes
     display_texture: Option<TextureHandle>,   // Texture for the screen capture
@@ -140,15 +138,11 @@ impl RustreamApp {
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
 
-        let audio_capturer = AudioCapturer::new(
-            config.clone()
-        );
 
         RustreamApp {
             config,
             frame_grabber,
             video_recorder,
-            audio_capturer,
             textures,
             sender: None,
             sender_rx: None,
@@ -588,16 +582,7 @@ impl RustreamApp {
                 ui.heading("Audio Settings");
                 ui.separator();
 
-                // let mut config = self.config.lock().unwrap();
-                ui.checkbox(&mut config.audio.enabled, "Enable Audio");
-                if config.audio.enabled {
-                    ui.add(
-                        egui::Slider::new(&mut config.audio.volume, 0.0..=1.0)
-                            .text("Volume")
-                            .step_by(0.1),
-                    );
-                }
-
+                
                 // Apply changes if the config has changed
                 let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
                 if has_config_changed {
@@ -1239,31 +1224,11 @@ impl RustreamApp {
     }
 
     fn start_recording(&mut self) {
-        // Start audio capture first
-        if let Err(e) = self.audio_capturer.start() {
-            error!("Failed to start audio capture: {}", e);
-            return;
-        }
-
         // Then start video recording
         self.video_recorder.start();
     }
 
     fn stop_recording(&mut self) {
-        // Stop audio capture first and get the buffer
-        self.audio_capturer.stop();
-        let audio_buffer = self.audio_capturer.take_audio_buffer();
-
-        // Pass audio buffer to video recorder before stopping
-        if !audio_buffer.is_empty() {
-            if let Err(e) = 
-                self.video_recorder.process_audio(audio_buffer
-            ) {
-                error!("Failed to process audio: {}", e);
-            }
-        }
-
-        // Finally stop video recording
         self.video_recorder.stop();
     }
 
