@@ -1,15 +1,17 @@
 use super::{BgraBuffer, CaptureArea, RgbaBuffer};
-use image::{ImageBuffer, RgbaImage};
+// use image::{ImageBuffer, RgbaImage};
+use image::RgbaImage;
 use std::env;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use tracing::debug;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {
     pub width: usize,
     pub height: usize,
-    pub rgba_data: Arc<RgbaImage>,
+    pub rgba_data: Vec<u8>,
 }
 
 impl CapturedFrame {
@@ -42,13 +44,10 @@ impl CapturedFrame {
         crop_area: CaptureArea,
     ) -> (RgbaBuffer, usize, usize) {
         // Debug input values
-        log::debug!("Initial buffer: {}x{}", buffer_width, buffer_height);
-        log::debug!(
+        debug!("Initial buffer: {}x{}", buffer_width, buffer_height);
+        debug!(
             "Requested crop: x={}, y={}, w={}, h={}",
-            crop_area.x,
-            crop_area.y,
-            crop_area.width,
-            crop_area.height
+            crop_area.x, crop_area.y, crop_area.width, crop_area.height
         );
 
         // Ensure crop coordinates are within bounds
@@ -66,7 +65,7 @@ impl CapturedFrame {
             buffer_height,
         );
 
-        log::debug!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
+        debug!("Adjusted crop: x={}, y={}, w={}, h={}", x, y, width, height);
 
         // Allocate output buffer
         let mut rgba_data = vec![0u8; width * height * 4];
@@ -91,7 +90,7 @@ impl CapturedFrame {
             }
         }
 
-        log::debug!("Output buffer: {}x{}", width, height);
+        debug!("Output buffer: {}x{}", width, height);
         (rgba_data, width, height)
     }
 
@@ -112,14 +111,10 @@ impl CapturedFrame {
             }
         };
 
-        // Create an ImageBuffer from the processed data
-        let image: RgbaImage =
-            ImageBuffer::from_vec(final_width as u32, final_height as u32, rgba_data)
-                .expect("Failed to create image from buffer");
         Self {
             width: final_width,
             height: final_height,
-            rgba_data: Arc::new(image),
+            rgba_data,
         }
     }
 
@@ -128,14 +123,10 @@ impl CapturedFrame {
         buffer_width: usize,
         buffer_height: usize,
     ) -> Self {
-        // Create an ImageBuffer from the processed data
-        let image: RgbaImage =
-            ImageBuffer::from_vec(buffer_width as u32, buffer_height as u32, buffer_rgba)
-                .expect("Failed to create image from buffer");
         Self {
             width: buffer_width,
             height: buffer_height,
-            rgba_data: Arc::new(image),
+            rgba_data: buffer_rgba,
         }
     }
     pub fn encode_to_h265(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -195,5 +186,15 @@ impl CapturedFrame {
         }
 
         Ok(output.stdout)
+    }
+    pub fn save(&self, path: &PathBuf) -> Result<(), image::ImageError> {
+        let image: RgbaImage = image::ImageBuffer::from_raw(
+            self.width as u32,
+            self.height as u32,
+            self.rgba_data.clone(),
+        )
+        .expect("Failed to create image buffer");
+
+        image.save(path)
     }
 }

@@ -24,6 +24,7 @@ use std::env;
 use std::process::Command;
 
 use display_info::DisplayInfo;
+use tracing::{debug, error, info, warn};
 
 lazy_static! {
     pub static ref GLOBAL_CAPTURE_AREA: Arc<Mutex<CaptureArea>> =
@@ -367,15 +368,15 @@ impl RustreamApp {
                         // Open a new full-size window for selecting capture area
                         //check if the process with arg --secondary is opened yet
                         //shows in console value of selected_monitor
-                        //log::info!("Selected Monitor: {}", selected_monitor);
+                        //info!("Selected Monitor: {}", selected_monitor);
                         let displays = DisplayInfo::all().unwrap_or_default();
-                        //log::info!("Displays: {:?}", displays);
+                        //info!("Displays: {:?}", displays);
                         let display = displays.get(*selected_monitor).unwrap_or_else(|| {
-                            log::error!("Monitor not found: {}", selected_monitor);
+                            error!("Monitor not found: {}", selected_monitor);
                             std::process::exit(1);
                         });
                         //display name + x and y
-                        log::info!("Display: {} ({},{}) ({}x{}) {}", display.name, display.x, display.y,display.width,display.height, display.scale_factor);
+                        println!("[INFO] Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
                         let output = Command::new(env::current_exe().unwrap())
                         .arg("--secondary")
                         .arg(display.x.to_string())
@@ -389,14 +390,14 @@ impl RustreamApp {
                             if output.status.success() {
                                 // Parse stdout with error handling
                                 let stdout = std::str::from_utf8(&output.stdout).unwrap_or_else(|e| {
-                                    log::error!("Failed to read stdout: {}", e);
+                                    error!("Failed to read stdout: {}", e);
                                     ""
                                 });
-                                log::debug!("Main process received: {}", stdout);
+                                debug!("Main process received: {}", stdout);
                             
                                 // Parse JSON with detailed error handling
                                 let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap_or_else(|e| {
-                                    log::error!("Failed to parse JSON response: {}", e);
+                                    error!("Failed to parse JSON response: {}", e);
                                     serde_json::json!({ "status": "error" })
                                 });
                                 
@@ -405,9 +406,9 @@ impl RustreamApp {
                                         if let Some(data) = json_response.get("data") {
                                             // Detailed error handling for struct mismatch
                                             let capture_area = serde_json::from_value(data.clone()).unwrap_or_else(|e| {
-                                                log::error!("Failed to parse capture area data: {}", e);
-                                                log::error!("Possible struct mismatch between SecondaryApp and main process");
-                                                log::error!("Expected format: {{x: usize, y: usize, width: usize, height: usize}}");
+                                                error!("Failed to parse capture area data: {}", e);
+                                                error!("Possible struct mismatch between SecondaryApp and main process");
+                                                error!("Expected format: {{x: usize, y: usize, width: usize, height: usize}}");
                                                 None
                                             });
                                             self.capture_area = capture_area;
@@ -417,20 +418,20 @@ impl RustreamApp {
                                         println!("User cancelled the capture operation");
                                     }
                                     _ => {
-                                        log::error!("Unknown status in response");
+                                        error!("Unknown status in response");
                                     }
                                 }
                             } else {
                                 // Handle process errors
                                 match std::str::from_utf8(&output.stderr) {
                                     Ok(stderr) if !stderr.is_empty() => {
-                                        log::error!("Secondary process error: {}", stderr);
+                                        error!("Secondary process error: {}", stderr);
                                     }
                                     Err(e) => {
-                                        log::error!("Failed to read stderr: {}", e);
+                                        error!("Failed to read stderr: {}", e);
                                     }
                                     _ => {
-                                        log::error!("Secondary process failed with no error output");
+                                        error!("Secondary process failed with no error output");
                                     }
                                 }
                             }
@@ -613,7 +614,7 @@ impl RustreamApp {
                 // Apply changes if the config has changed
                 let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
                 if has_config_changed {
-                    log::debug!("Config changed: {:?}", config);
+                    debug!("Config changed: {:?}", config);
                     self.config.lock().unwrap().update(config);
                     self.frame_grabber.reset_capture();
                 }
@@ -1185,7 +1186,7 @@ impl RustreamApp {
     fn start_recording(&mut self) {
         // Start audio capture first
         if let Err(e) = self.audio_capturer.start() {
-            log::error!("Failed to start audio capture: {}", e);
+            error!("Failed to start audio capture: {}", e);
             return;
         }
 
@@ -1203,7 +1204,7 @@ impl RustreamApp {
             if let Err(e) = 
                 self.video_recorder.process_audio(audio_buffer
             ) {
-                log::error!("Failed to process audio: {}", e);
+                error!("Failed to process audio: {}", e);
             }
         }
 
@@ -1315,12 +1316,12 @@ impl RustreamApp {
         let image: ColorImage = match egui_extras::image::load_svg_bytes(resource.path) {
             Ok(img) => img,
             Err(e) => {
-                log::error!("Failed to load image: {}", e);
+                error!("Failed to load image: {}", e);
                 if let Some(error_texture) = textures.get(&TextureId::default()) {
                     textures.insert(resource.id, error_texture.clone());
                     return;
                 } else {
-                    log::error!("Default Texture not found.");
+                    error!("Default Texture not found.");
                     ColorImage::new([50, 50], egui::Color32::RED)
                 }
             }

@@ -11,9 +11,10 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
+use tracing::{debug, error, info, warn};
 
 use hound::{WavSpec, WavWriter};
-use image::RgbaImage;
+// use image::RgbaImage;
 
 pub struct VideoRecorder {
     config: Arc<Mutex<Config>>,
@@ -27,7 +28,7 @@ pub struct VideoRecorder {
     start_time: Option<Instant>,
     last_frame_time: Option<Instant>,
     target_frame_duration: Duration,
-    frame_sender: Option<mpsc::Sender<(Arc<RgbaImage>, PathBuf)>>,
+    frame_sender: Option<mpsc::Sender<(CapturedFrame, PathBuf)>>,
 }
 
 impl Default for VideoRecorder {
@@ -80,7 +81,7 @@ impl VideoRecorder {
             let temp_dir = config.video.temp_dir.clone();
             if !temp_dir.exists() {
                 if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-                    log::error!("Failed to create temp directory: {}", e);
+                    error!("Failed to create temp directory: {}", e);
                     return;
                 }
             }
@@ -95,14 +96,14 @@ impl VideoRecorder {
             while let Ok((image_data, frame_path)) = receiver.recv() {
                 match image_data.save(&frame_path) {
                     Ok(_) => (),
-                    Err(e) => log::error!("Failed to save frame: {}", e),
+                    Err(e) => error!("Failed to save frame: {}", e),
                 }
             }
         });
         self.frame_writer_handle = Some(handle);
         self.cleanup();
         self.is_recording.store(true, Ordering::SeqCst);
-        log::info!("Started recording to {:?}", temp_dir);
+        info!("Started recording to {:?}", temp_dir);
     }
 
     pub fn record_frame(&mut self, frame: &CapturedFrame) {
@@ -136,8 +137,8 @@ impl VideoRecorder {
 
         // Send frame to background thread through channel
         if let Some(sender) = &self.frame_sender {
-            if let Err(e) = sender.send((frame.rgba_data.clone(), frame_path)) {
-                log::error!("Failed to send frame to writer thread: {}", e);
+            if let Err(e) = sender.send((frame.clone(), frame_path)) {
+                error!("Failed to send frame to writer thread: {}", e);
             }
         }
     }
@@ -153,7 +154,7 @@ impl VideoRecorder {
         self.is_finalizing.store(true, Ordering::SeqCst);
 
         self.frame_sender.take();
-        log::info!("Recording stopped, waiting for pending frames...");
+        info!("Recording stopped, waiting for pending frames...");
 
         // Get necessary data before spawning thread
         let writer_handle = self.frame_writer_handle.take();
@@ -174,7 +175,7 @@ impl VideoRecorder {
             drop(config_guard); // Release lock early
 
             let fps = Self::calculate_fps(frame_counter, &video_config, &audio_file, start_time);
-            log::info!(
+            info!(
                 "Recording metrics - Frames: {}, Duration: {:.2}s, Calculated FPS: {}",
                 frame_counter,
                 start_time.map_or(0.0, |t| t.elapsed().as_secs_f64()),
@@ -197,7 +198,7 @@ impl VideoRecorder {
         fps: &u32,
     ) {
         let output_path = Self::generate_unique_path(video_config.output_path.clone());
-        log::info!("Generating video...");
+        info!("Generating video...");
 
         let mut command = Command::new("ffmpeg");
 
@@ -219,7 +220,7 @@ impl VideoRecorder {
         // Add audio input BEFORE video encoding params
         if let Some(audio_path) = &audio_file {
             if audio_path.exists() {
-                log::info!("Adding audio from: {:?}", audio_path);
+                info!("Adding audio from: {:?}", audio_path);
                 command
                     .arg("-i")
                     .arg(audio_path)
@@ -234,7 +235,7 @@ impl VideoRecorder {
                     .arg("-vsync")
                     .arg("cfr"); // Set precise timestamps
             } else {
-                log::warn!("Audio file not found at: {:?}", audio_path);
+                warn!("Audio file not found at: {:?}", audio_path);
             }
         }
 
@@ -270,23 +271,23 @@ impl VideoRecorder {
 
         // Set output path
         command.arg(output_path.clone());
-        log::debug!("FFmpeg command: {:?}", command);
+        debug!("FFmpeg command: {:?}", command);
 
         match command.output() {
             Ok(output) => {
                 // Log FFmpeg output for debugging
-                log::debug!("FFmpeg stdout: {}", String::from_utf8_lossy(&output.stdout));
+                debug!("FFmpeg stdout: {}", String::from_utf8_lossy(&output.stdout));
 
                 if output.status.success() {
-                    log::info!(
+                    info!(
                         "Video generated successfully: {}",
                         output_path.to_string_lossy()
                     );
                 } else {
-                    log::error!("FFmpeg failed with status: {}", output.status);
+                    error!("FFmpeg failed with status: {}", output.status);
                 }
             }
-            Err(e) => log::error!("FFmpeg execution failed: {}", e),
+            Err(e) => error!("FFmpeg execution failed: {}", e),
         }
     }
 
@@ -308,7 +309,7 @@ impl VideoRecorder {
         };
 
         let audio_path = temp_dir.join("audio.wav");
-        log::debug!("Audio path: {:?}", audio_path);
+        debug!("Audio path: {:?}", audio_path);
 
         let spec = WavSpec {
             channels: audio_config.channels,
@@ -337,7 +338,7 @@ impl VideoRecorder {
         writer.finalize()?;
 
         self.audio_file = Some(audio_path);
-        log::info!("Audio saved succesfully");
+        info!("Audio saved succesfully");
         Ok(())
     }
 
@@ -357,32 +358,28 @@ impl VideoRecorder {
         let duration_secs = if let Some(start) = start_time {
             start.elapsed().as_secs_f64()
         } else {
-            log::warn!("No start time available, using config fps");
+            warn!("No start time available, using config fps");
             return config.fps;
         };
 
         // Calculate actual FPS based on frame count and duration
         let actual_fps = if duration_secs > 0.1 {
             let calculated_fps = (frame_counter as f64 / duration_secs).round() as u32;
-            log::info!(
+            info!(
                 "FPS calculation: {} frames / {:.2}s = {} fps (config: {} fps)",
-                frame_counter,
-                duration_secs,
-                calculated_fps,
-                config.fps
+                frame_counter, duration_secs, calculated_fps, config.fps
             );
             calculated_fps
         } else {
-            log::warn!("Duration too short, using config fps");
+            warn!("Duration too short, using config fps");
             config.fps
         };
 
         // Validate against config
         if (actual_fps as i32 - config.fps as i32).abs() > 5 {
-            log::warn!(
+            warn!(
                 "Large FPS deviation - Actual: {}, Config: {}",
-                actual_fps,
-                config.fps
+                actual_fps, config.fps
             );
         }
 
@@ -429,7 +426,7 @@ impl Drop for VideoRecorder {
         // Clean up temp directory if it exists
         if temp_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&temp_dir) {
-                log::error!("Failed to clean up temp directory on drop: {}", e);
+                error!("Failed to clean up temp directory on drop: {}", e);
             }
         }
     }

@@ -174,7 +174,7 @@ impl FrameGrabber {
                     let monitor = match get_monitor_from_index(new_monitor_index) {
                         Ok(m) => m,
                         Err(_) => {
-                            log::error!("Failed to get monitor with index {}", new_monitor_index);
+                            error!("Failed to get monitor with index {}", new_monitor_index);
                             thread::sleep(std::time::Duration::from_secs(1));
                             return;
                         }
@@ -183,7 +183,7 @@ impl FrameGrabber {
                     let width = monitor.width() as u32;
                     let height = monitor.height() as u32;
 
-                    log::debug!(
+                    debug!(
                         "Monitor dimensions: {}x{}",
                         width,
                         height,
@@ -196,7 +196,7 @@ impl FrameGrabber {
                             current_dimensions = (width, height);
                         }
                         Err(e) => {
-                            log::error!("Failed to initialize Capturer: {:?}", e);
+                            error!("Failed to initialize Capturer: {:?}", e);
                             thread::sleep(std::time::Duration::from_millis(100));
                             return;
                         }
@@ -225,10 +225,10 @@ impl FrameGrabber {
                         }
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
-                                log::debug!("Frame not ready; skipping this frame.");
+                                debug!("Frame not ready; skipping this frame.");
                             }
                             std::io::ErrorKind::ConnectionReset => {
-                                log::error!(
+                                error!(
                                     r"Strange Error: {e}.
                                     Resetting capturer.
                                     Make sure that if you changed your screen size, keep it at 16:9 ratio."
@@ -236,7 +236,7 @@ impl FrameGrabber {
                                 capturer = None; // Force reinitialization on next iteration
                             }
                             _ => {
-                                log::error!("What did just happen? {e:?}");
+                                error!("What did just happen? {e:?}");
                                 capturer = None; // Force reinitialization on next iteration
                             }
                         },
@@ -258,7 +258,7 @@ impl FrameGrabber {
                 //     // Align to 16 bytes
                 //     self.stride = (self.stride + 15) & !15;
                 // }
-                log::debug!(
+                debug!(
                     "Monitor dimensions: {}x{}",
                     width,
                     height,
@@ -268,7 +268,7 @@ impl FrameGrabber {
                 let mut capturer = match Capturer::new(monitor) {
                     Ok(c) => c,
                     Err(e) => {
-                        log::error!("Failed to initialize Capturer: {:?}, Error details: {:?}", e, e.to_string());
+                        error!("Failed to initialize Capturer: {:?}, Error details: {:?}", e, e.to_string());
                         return;
                     }
                 };
@@ -298,11 +298,11 @@ impl FrameGrabber {
                     }
                     Err(e) => match e.kind() {
                         std::io::ErrorKind::WouldBlock => {
-                            log::debug!("Frame not ready; skipping this frame.");
+                            debug!("Frame not ready; skipping this frame.");
                             //None
                         }
                         std::io::ErrorKind::ConnectionReset => {
-                            log::error!(
+                            error!(
                                 r"Strange Error: {e}.
                                 Resetting capturer.
                                 Make sure that if you changed your screen size, keep it at 16:9 ratio."
@@ -311,7 +311,7 @@ impl FrameGrabber {
                             //None
                         }
                         _ => {
-                            log::error!("What did just happen? {e:?}");
+                            error!("What did just happen? {e:?}");
                             //None
                         }
                     },
