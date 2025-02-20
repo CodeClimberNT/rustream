@@ -82,7 +82,7 @@ impl Sender {
                         }
                     }
 
-                    /*Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                    Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                         eprintln!("Connection reset by peer: {}", e);
                         // Handle connection reset, possibly retry connection
                         /*let buffer = "TRY_RECONNECTION".as_bytes();
@@ -90,7 +90,7 @@ impl Sender {
                             //Ok(_) => Ok(socket),
                            eprintln!("Failed to reconnect to receiver");
                         }*/
-                    },*/
+                    },
                     Err(e) => eprintln!("Error receiving connection: {}", e),
                 }
             }
@@ -215,7 +215,7 @@ impl Receiver {
                 Ok(_) => {
                     println!("Connected to sender");
                 }
-                Err(_) => println!("Failed to connect to sender"), //come me lo gestisco questo errore?
+                Err(_) => println!("Failed to send registration request"), //come me lo gestisco questo errore?
             }
         }
 
