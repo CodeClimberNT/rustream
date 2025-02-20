@@ -692,8 +692,11 @@ impl RustreamApp {
             }
             
             let mut frames = self.captured_frames.lock().unwrap();
-            if let Some(display_frame) = frames.pop_back() {
-                frames.clear();
+            if let Some(display_frame) = frames.pop_front() {
+                if frames.len() > 7 {
+                    frames.clear();
+                }
+                
                 drop(frames);
 
                 // TODO: Move to receiver
@@ -860,6 +863,10 @@ impl RustreamApp {
                                 if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
                                     let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
                                     self.caster_addr = Some(caster_addr); 
+
+                                    let mut frames = self.received_frames.lock().unwrap();
+                                    frames.clear();  //clear the previous frame queue
+                                    drop(frames);
                             
                                     // Initialize receiver
                                     //if self.receiver.is_none()  {  //&& !self.socket_created
