@@ -9,6 +9,7 @@ use tokio::sync::Notify;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 // use std::time::Duration;
@@ -61,6 +62,7 @@ pub struct RustreamApp {
     triggered_actions: Vec<HotkeyAction>,
     previous_monitor: usize,
     is_address_valid: bool,
+    host_unreachable: Arc<AtomicBool>,
 }
 
 
@@ -171,7 +173,8 @@ impl RustreamApp {
             caster_addr: None,
             cropped_frame: None,
             stop_task: None,      
-            is_address_valid: true,      
+            is_address_valid: true,  
+            host_unreachable: Arc::new(AtomicBool::new(false)),    
         }
     }
 
@@ -827,7 +830,7 @@ impl RustreamApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Receiver Mode");
-            ui.vertical_centered(|ui| {
+            ui.vertical_centered(|ui| { 
 
                 if !self.is_receiving {
                     ui.label("Enter the Sender's IP Address");
@@ -941,21 +944,16 @@ impl RustreamApp {
                                         Err(_) => println!("the sender dropped or no data received"),
                                     }*/
                                     self.is_receiving = true;
-                                } else{
+
+                                    // Add a loading indicator while waiting for receiver initialization
+                                    /*if self.receiver.is_none() {
+                                        ui.spinner(); // Show a spinner while connecting
+                                        ui.label("Connecting to sender...");
+                                    }*/ //non funziona
+
+                                } else {
                                     self.is_address_valid = false;
                                 }
-
-
-                                
-
-                                /*// Add a loading indicator while waiting for receiver initialization
-                                if self.socket_created && self.receiver.is_none() {
-                                    ui.spinner(); // Show a spinner while connecting
-                                    ui.label("Connecting to sender...");
-                                }*/
-
-                                
-
                                 
                                 //check if inserted address is valid
                                 /*if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
@@ -1011,8 +1009,9 @@ impl RustreamApp {
                         });
                         if !self.is_address_valid {
                             ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                            //come faccio a farla comparire per più tempo?? scompare in un secondo
+                            
                         }
+    
                     //});
                 } else {
 
@@ -1025,24 +1024,8 @@ impl RustreamApp {
                     if ui.add(stop_button).clicked() {
                         println!("Stop clicked");
                         self.stop_notify.notify_waiters(); //in this way recv_data releases the lock
+                        self.host_unreachable.store(false, Ordering::SeqCst); //restore host unreachable value 
                         
-                        if let Some(receiver) = &self.receiver {
-                            let receiver = receiver.clone();
-                            let handle = tokio::spawn(async move {
-                                let recv = receiver.lock().await;
-                                recv.stop_receiving();                               
-                            });  
-
-                            self.stop_task = Some(handle);                          
-                        }   
-                    }
-                    ui.add_space(10.0);
-                }
-
-                // Continue stopping mechanism after close_connection message is sent
-                if let Some(handle) = &self.stop_task {
-                    if handle.is_finished() {
-                        self.stop_task.take();
                         self.receiver = None;
                         self.receiver_rx = None;
                         self.display_texture = None;
@@ -1054,8 +1037,13 @@ impl RustreamApp {
                         self.frame_times.clear();
                         self.current_fps = 0.0;
                     }
+                    ui.add_space(10.0);
                 }
 
+                if self.host_unreachable.load(Ordering::SeqCst) {
+                    ui.label(RichText::new("Host Unreachable").color(Color32::RED));
+                }
+    
                 // Check if we have a pending receiver initialization
                 if let Some(mut rx) = self.receiver_rx.take() {  //take consumes the receiver_rx
                     
@@ -1089,6 +1077,7 @@ impl RustreamApp {
 
                     //if let Some(caster_addr) = self.caster_addr {
                         let stop_notify = self.stop_notify.clone();
+                        let host_unreachable = self.host_unreachable.clone();
                     
                         tokio::spawn(async move {
                             
@@ -1112,7 +1101,7 @@ impl RustreamApp {
                                 //drop the lock before starting the receiving task
                                 drop(receiver);
                                 //println!("Receiving from the same sender");
-                                start_receiving(rcv_frames, receiver_clone2, stop_notify).await;
+                                start_receiving(rcv_frames, receiver_clone2, stop_notify, host_unreachable).await;
                                 
                             }
                             //println!("After start_receiving completed");
@@ -1141,6 +1130,7 @@ impl RustreamApp {
                             }*/
                         }); 
 
+                        
                         //while let Some(rx) = &mut self.frame_rx {
                         
                             //if let Ok(frame) = rx.try_recv() {
@@ -1195,7 +1185,14 @@ impl RustreamApp {
                                         println!("texture loaded");
                                     }
                                     
-                                }   
+                                } 
+                                else {
+                                    // Add a loading indicator while waiting for receiver initialization
+                                    if self.receiver.is_none() {
+                                        ui.spinner(); // Show a spinner while connecting
+                                        ui.label("Connecting to sender...");
+                                    }
+                                }  
                                 ctx.request_repaint();                 
                         //}
                     //} 

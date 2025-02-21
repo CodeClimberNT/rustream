@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
 use std::env;
-use std::io::ErrorKind::WouldBlock;
+use std::io::ErrorKind::{self, WouldBlock, ConnectionReset};
 use std::io::Write;
 use std::mem;
 use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -60,7 +61,7 @@ impl Sender {
             
             loop {
                 let mut buf = [0; 1472];
-                match socket.recv_from(&mut buf).await {
+                match socket.recv_from(&mut buf).await { //recv_from to receive from different clients
                     Ok((_, peer_addr)) => {                        
                         if let Ok(message) = from_utf8(&buf) {                        
 
@@ -199,23 +200,31 @@ pub struct Receiver {
     pub caster: SocketAddr, //Arc<Mutex<SocketAddr>>,
     //pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
     pub started_receiving: bool,
+    pub host_unreachable: bool,
     //pub frame_rx: Option<mpsc::Receiver<CapturedFrame>>,
 }
 
 impl Receiver {
     //create a new receiver, its socket and connect to the caster
-    pub async fn new(caster: SocketAddr) -> Self {
+    pub async fn new(caster: SocketAddr) -> Self { //Result<Self, std::io::Error>
         let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
         println!("Socket {} ", sock.local_addr().unwrap());
         let buf = "REQ_FRAMES".as_bytes();
         if let Ok(_) = sock.connect(caster).await {
             //connects socket to send/receive only from sender_addr
-            match sock.try_send(buf) {
+            match sock.send(buf).await {
                 //send datagram to caster to request the streaming
                 Ok(_) => {
                     println!("Connected to sender");
                 }
-                Err(_) => println!("Failed to send registration request"), //come me lo gestisco questo errore?
+                Err(e) if e.kind() == ErrorKind::ConnectionReset => {
+                    eprintln!("Destination unreachable: {}", e);
+                    //return Err(e);
+                }
+                Err(e) => {
+                    println!("Failed to send registration request: {}", e);
+                    //return Err(e);
+                }
             }
         }
 
@@ -224,6 +233,7 @@ impl Receiver {
             caster: caster, //Arc::new(Mutex::new(caster)),
             //frames: Arc::new(Mutex::new(VecDeque::new())),
             started_receiving: false,
+            host_unreachable: false,
             //frame_rx: None,
         }
     }
@@ -242,11 +252,7 @@ impl Receiver {
         }
     }
 
-    pub async fn recv_data(
-        &mut self,
-        tx: mpsc::Sender<Vec<u8>>,
-        stop_notify: Arc<Notify>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>) -> Result<(), std::io::Error> {
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
         let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
         let mut frame: Vec<u8> = Vec::new();
@@ -325,10 +331,18 @@ impl Receiver {
                                 frame.clear();
                             }
                         },
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Err(e) if e.kind() == WouldBlock => {
                             continue;
                         },
-                        Err(e) => println!("Error in receiving data {:?}", e), //dà WouldBlock, non trova dati da leggere
+                        Err(e) if e.kind() == ConnectionReset => {
+                            println!("Host unreachable");
+                            //self.host_unreachable = true;
+                            return Err(e);
+                        },
+                        Err(e) => {
+                            println!("Error in receiving data {:?}", e);
+                            return Err(e);
+                        }
                     }
                 }
             }
@@ -344,6 +358,12 @@ impl Receiver {
             }
             Err(_) => println!("Failed to close connection"),
         }
+    }
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        self.stop_receiving();
     }
 }
 
@@ -395,11 +415,8 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
      };*/
 }
 
-pub async fn start_receiving(
-    frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>,
-    receiver: Arc<Mutex<Receiver>>,
-    stop_notify: Arc<Notify>,
-) {
+pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, 
+    receiver: Arc<Mutex<Receiver>>, stop_notify: Arc<Notify>, host_unreachable: Arc<AtomicBool>) {
     //println!("Inside start_receiving");
 
     let mut recv = receiver.lock().await;
@@ -480,6 +497,7 @@ pub async fn start_receiving(
                     //if let Some(tx) = recv.frame_tx.clone() {
                         if let Err(e) = recv.recv_data(tx, stop_notify1).await{
                             println!("Error receiving frame: {}", e);
+                            host_unreachable.store(true, Ordering::SeqCst);
                         }
                         //if recv_data never ends recv is never dropped?
                         drop(recv);
