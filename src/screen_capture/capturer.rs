@@ -1,7 +1,7 @@
-use super::{CaptureArea, CapturedFrame};
+use super::CapturedFrame;
 use crate::config::Config;
 use image::{ImageBuffer, RgbaImage};
-use log::{debug, error, warn};
+use log::{debug, error};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
@@ -61,7 +61,7 @@ impl ScreenCapture {
         &self.monitors
     }
 
-    pub fn next_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
+    /*pub fn next_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
         if self.capturer.is_none() {
             let monitor = match get_monitor_from_index(
                 self.config.lock().unwrap().capture.selected_monitor,
@@ -109,7 +109,7 @@ impl ScreenCapture {
                 }
             },
         }
-    }
+    }*/
 
     pub fn capture_frame(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
         //-> Option<CapturedFrame>  tx: mpsc::SyncSender<CapturedFrame>
@@ -193,8 +193,8 @@ impl ScreenCapture {
                                 img_buffer,
                             );
 
-                            let mut frames = captured_frames.lock().unwrap();
-
+                            let mut frames = captured_frames.lock().unwrap();                       
+                            
                             frames.push_back(rgba_img);
                         }
 
@@ -217,7 +217,7 @@ impl ScreenCapture {
                         },
                     }
                 }
-                thread::sleep(std::time::Duration::from_millis(1000 / 40));
+                thread::sleep(std::time::Duration::from_millis(1000 / 6));
             }
         });
     }

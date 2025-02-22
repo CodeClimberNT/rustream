@@ -1,14 +1,12 @@
 use std::collections::VecDeque;
-use std::env;
 use std::io::ErrorKind::{self, WouldBlock, ConnectionReset};
 use std::io::Write;
-use std::mem;
 use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
 
@@ -121,9 +119,7 @@ impl Sender {
         println!("Frame id: {:?}", *fid);
         let mut seq_num: u16 = 0;
         //encoded_frame size = num elements (len()) * size of element (u8)[1 byte]
-        let total_chunks = (encoded_frame.len() as f32
-            / (MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) as f32)
-            .ceil() as u16;
+        let total_chunks = (encoded_frame.len() as f32 / (MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) as f32).ceil() as u16;
         println!("Total chunks: {:?}", total_chunks);
 
         for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
@@ -149,7 +145,7 @@ impl Sender {
 
 pub async fn start_streaming(sender: Arc<Mutex<Sender>>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
-    let sender_clone = sender.clone();
+    //let sender_clone = sender.clone();
     //let sender_clone1 = sender.clone();
     let mut sender = sender.lock().await;
     if !sender.started_sending {
@@ -197,11 +193,7 @@ pub async fn start_streaming(sender: Arc<Mutex<Sender>>, frame: CapturedFrame) -
 
 pub struct Receiver {
     pub socket: UdpSocket,  //Arc<UdpSocket>
-    pub caster: SocketAddr, //Arc<Mutex<SocketAddr>>,
-    //pub frames: Arc<Mutex<VecDeque<CapturedFrame>>>, //o va bene solo mutex?
     pub started_receiving: bool,
-    pub host_unreachable: bool,
-    //pub frame_rx: Option<mpsc::Receiver<CapturedFrame>>,
 }
 
 impl Receiver {
@@ -230,16 +222,12 @@ impl Receiver {
 
         Self {
             socket: sock,   //Arc::new(sock),
-            caster: caster, //Arc::new(Mutex::new(caster)),
-            //frames: Arc::new(Mutex::new(VecDeque::new())),
             started_receiving: false,
-            host_unreachable: false,
-            //frame_rx: None,
         }
     }
 
     //send datagram to caster to request the streaming
-    pub async fn connect_to_sender(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /*pub async fn connect_to_sender(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         //let socket = UdpSocket::bind("0.0.0.0:0").await?;
         let buf = "REQ_FRAME".as_bytes();
         self.socket.connect(self.caster).await?; //connects socket to send/receive only from sender_addr
@@ -250,7 +238,7 @@ impl Receiver {
             }
             Err(_) => Err("Failed to connect to sender")?,
         }
-    }
+    }*/
 
     pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>) -> Result<(), std::io::Error> {
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
@@ -496,7 +484,7 @@ pub async fn start_receiving(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedF
                     println!("Calling recv_data");
                     //if let Some(tx) = recv.frame_tx.clone() {
                         if let Err(e) = recv.recv_data(tx, stop_notify1).await{
-                            println!("Error receiving frame: {}", e);
+                            //println!("Error receiving frame: {}", e);
                             host_unreachable.store(true, Ordering::SeqCst);
                         }
                         //if recv_data never ends recv is never dropped?
@@ -547,9 +535,9 @@ fn decode_from_h265_to_rgba(
 ) -> Result<CapturedFrame, Box<dyn std::error::Error + Send + Sync>> {
     //println!("Dimension of encoded frame: {}", frame.len());
 
-    let platform = env::consts::OS; //detect OS
+    //let platform = env::consts::OS; //detect OS
 
-    let (gpu_acceleration, decoder) = match platform {
+    /*let (gpu_acceleration, decoder) = match platform {
         "linux" =>
         // On Linux, prefer VAAPI (works with Intel/AMD)
         {
@@ -567,7 +555,7 @@ fn decode_from_h265_to_rgba(
         }
 
         _ => (["", ""], ["-c:v", "hevc"]),
-    };
+    };*/
 
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
@@ -653,6 +641,6 @@ fn get_h265_dimensions(
     let width = dim_pattern[1].parse()?;
     let height = dim_pattern[2].parse()?;
 
-    println!("Dimensions: {}x{}", width, height);
+    //println!("Dimensions: {}x{}", width, height);
     Ok((width, height))
 }

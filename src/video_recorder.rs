@@ -1,7 +1,7 @@
 use crate::config::{ Config, VideoConfig};
 use crate::screen_capture::CapturedFrame;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use std::time::{Duration, Instant};
 use std::{
     path::PathBuf,

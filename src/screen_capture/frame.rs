@@ -1,8 +1,6 @@
-use super::{BgraBuffer, CaptureArea, RgbaBuffer};
+use super::RgbaBuffer;
 // use image::{ImageBuffer, RgbaImage};
 use image::{GenericImageView, ImageBuffer, RgbaImage};
-use log::debug;
-use std::env;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -15,7 +13,7 @@ pub struct CapturedFrame {
 }
 
 impl CapturedFrame {
-    fn bgra_to_rgba(buffer_bgra: BgraBuffer, width: usize, height: usize) -> RgbaBuffer {
+    /*fn bgra_to_rgba(buffer_bgra: BgraBuffer, width: usize, height: usize) -> RgbaBuffer {
         // Calculate the stride (bytes per row)
         let stride = buffer_bgra.len() / height;
 
@@ -35,9 +33,9 @@ impl CapturedFrame {
             }
         }
         rgba
-    }
+    }*/
 
-    fn bgra_to_rgba_with_crop(
+    /*fn bgra_to_rgba_with_crop(
         buffer_bgra: BgraBuffer,
         buffer_width: usize,
         buffer_height: usize,
@@ -92,9 +90,9 @@ impl CapturedFrame {
 
         debug!("Output buffer: {}x{}", width, height);
         (rgba_data, width, height)
-    }
+    }*/
 
-    pub fn from_bgra_buffer(
+    /*pub fn from_bgra_buffer(
         buffer_bgra: BgraBuffer,
         buffer_width: usize,
         buffer_height: usize,
@@ -116,7 +114,7 @@ impl CapturedFrame {
             height: final_height,
             rgba_data,
         }
-    }
+    }*/
 
     pub fn from_rgba_vec(
         buffer_rgba: RgbaBuffer,

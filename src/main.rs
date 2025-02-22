@@ -48,7 +48,7 @@ async fn main() {
             fullscreen: Some(false),
             title: Some(APP_TITLE.to_string()),
             window_type: Option::from(X11WindowType::Toolbar),
-            min_inner_size: Some(Vec2::new(400.0, 300.0)),
+            min_inner_size: Some(Vec2::new(700.0, 500.0)),
             ..Default::default()
         },
         ..Default::default()

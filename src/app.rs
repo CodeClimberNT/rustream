@@ -55,7 +55,6 @@ pub struct RustreamApp {
     frame_times: std::collections::VecDeque<std::time::Duration>,
     current_fps: f32,
     is_receiving: bool,
-    stop_task: Option<tokio::task::JoinHandle<()>>, // Handle to the stop task
     started_capture: bool,
     hotkey_manager: HotkeyManager,
     editing_hotkey: Option<HotkeyAction>,
@@ -171,8 +170,7 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            cropped_frame: None,
-            stop_task: None,      
+            cropped_frame: None, 
             is_address_valid: true,  
             host_unreachable: Arc::new(AtomicBool::new(false)),    
         }
@@ -223,10 +221,10 @@ impl RustreamApp {
                     .add(
                         egui::Button::new(
                             egui::RichText::new("CAST NEW STREAMING")
-                                .size(32.0)
+                                .size(25.0)
                                 .strong(),
                         )
-                        .min_size(egui::vec2(300.0, 60.0)),
+                        .min_size(egui::vec2(300.0, 50.0)),
                     )
                     .clicked()
                 {
@@ -237,9 +235,9 @@ impl RustreamApp {
                 if ui
                 .add(
                     egui::Button::new(
-                        egui::RichText::new("VIEW STREAMING").size(32.0).strong(),
+                        egui::RichText::new("VIEW STREAMING").size(25.0).strong(),
                     )
-                    .min_size(egui::vec2(300.0, 60.0)),
+                    .min_size(egui::vec2(300.0, 50.0)),
                 )
                 .clicked()
                 {
@@ -665,7 +663,6 @@ impl RustreamApp {
                 if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
                     self.show_config = true;
                 }
-                self.render_recording_controls(ui);
                 ui.add_space(50.0);
 
                 
@@ -676,8 +673,6 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            //modificare qui, mettere thread::spawn per catturare il frame in un altro thread e mettere il thread a dormire per un secondo
-            //poi metto il frame catturato in un mutex e l'ui lo prenderà da lì
             
             let cap_frames = self.captured_frames.clone();
 
@@ -691,17 +686,13 @@ impl RustreamApp {
             }
             
             let mut frames = self.captured_frames.lock().unwrap();
-            if let Some(display_frame) = frames.pop_front() {
+            if let Some(display_frame) = frames.pop_front() { //front().cloned()
                 if frames.len() > 7 {
-                    frames.clear();
+                    println!("Captured_Frames len: {}, dropping frames", frames.len());
+                    frames.clear() //truncate(3); //only leave 3 elements
                 }
                 
                 drop(frames);
-
-                // TODO: Move to receiver
-                if self.video_recorder.is_recording() {
-                    self.video_recorder.record_frame(&display_frame);
-                }
        
                 if self.streaming_active {
                     // Initialize sender if it doesn't exist
@@ -742,6 +733,16 @@ impl RustreamApp {
                     // Send frame if we have a sender
                     if let Some(sender) = &self.sender { //i redo the check to extract the sender from Option<Sender>
                         let sender_clone = sender.clone();
+                        //let mut frames = self.captured_frames.lock().unwrap();
+
+                        /*for frame in frames.drain(..) { // Take all frames for streaming
+                            let sender = sender.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = start_streaming(sender, frame).await {
+                                    eprintln!("Error sending frame: {}", e);
+                                }
+                            });
+                        }*/
                         let clone_frame = display_frame.clone();
                         tokio::spawn(async move {
                             if let Err(e) = start_streaming(sender_clone, clone_frame).await {
@@ -751,62 +752,62 @@ impl RustreamApp {
                     }
                 }
 
-                    // Convert to ColorImage for display
-                    let image: ColorImage = if let Some(area) = self.capture_area {
-                        // Apply cropping if we have a capture area
-                        if let Some(cropped) =
-                            display_frame
-                                .clone()
-                                .view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
-                        {
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [cropped.width, cropped.height ],
-                                &cropped.rgba_data, // Changed from frame_data to rgba_data
-                            )
-                        } else {
-                            // Fallback to full image if crop parameters are invalid
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [display_frame.width, display_frame.height],
-                                &display_frame.rgba_data, // Changed from frame_data to rgba_data
-                            )
-                        }
-                    } else {
-                        // No crop area selected, show full image
+                // Convert to ColorImage for display
+                let image: ColorImage = if let Some(area) = self.capture_area {
+                    // Apply cropping if we have a capture area
+                    if let Some(cropped) =
+                        display_frame
+                            .clone()
+                            .view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
+                    {
                         egui::ColorImage::from_rgba_unmultiplied(
-                            [display_frame.width, display_frame.height ],
+                            [cropped.width, cropped.height ],
+                            &cropped.rgba_data, // Changed from frame_data to rgba_data
+                        )
+                    } else {
+                        // Fallback to full image if crop parameters are invalid
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [display_frame.width, display_frame.height],
                             &display_frame.rgba_data, // Changed from frame_data to rgba_data
                         )
-                    };
-    
-                    // Store the active frame for network transmission if needed
-                    self.cropped_frame = if let Some(area) = self.capture_area {
-                        display_frame.view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
-                    } else {
-                        Some(display_frame)
-                    };
-
-                    // Update texture in memory
-                    match self.display_texture {
-                        Some(ref mut texture) => {
-                            texture.set(image, egui::TextureOptions::default());
-                        }
-                        None => {
-                            self.display_texture = Some(ctx.load_texture(
-                                "display_texture",
-                                image,
-                                egui::TextureOptions::default(),
-                            ));
-                        }
                     }
-                    ctx.request_repaint();
-                }
+                } else {
+                    // No crop area selected, show full image
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [display_frame.width, display_frame.height ],
+                        &display_frame.rgba_data, // Changed from frame_data to rgba_data
+                    )
+                };
 
-                // Update texture in UI
-                let texture = self
-                    .display_texture
-                    .as_ref()
-                    .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
-                ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+                // Store the active frame for network transmission if needed
+                self.cropped_frame = if let Some(area) = self.capture_area {
+                    display_frame.view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
+                } else {
+                    Some(display_frame)
+                };
+
+                // Update texture in memory
+                match self.display_texture {
+                    Some(ref mut texture) => {
+                        texture.set(image, egui::TextureOptions::default());
+                    }
+                    None => {
+                        self.display_texture = Some(ctx.load_texture(
+                            "display_texture",
+                            image,
+                            egui::TextureOptions::default(),
+                        ));
+                    }
+                }
+                ctx.request_repaint();
+            }
+
+            // Update texture in UI
+            let texture = self
+                .display_texture
+                .as_ref()
+                .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
+            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
 
             // } else {
                 //     self.display_texture = None;
@@ -815,18 +816,9 @@ impl RustreamApp {
         });
     }
 
-    pub fn receiver_page(&mut self, ctx: &Context) {
+    pub fn receiver_page(&mut self, ctx: &Context, ui: &mut Ui) {
 
-        // Add a container for the entire window content
-        egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.current_fps > 0.0 {
-                        ui.colored_label(egui::Color32::GREEN, format!("FPS: {:.1}", self.current_fps));
-                    }
-                });
-            });
-        });
+        self.show_fps_counter(ctx, ui);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Receiver Mode");
@@ -837,211 +829,101 @@ impl RustreamApp {
                     ui.add_space(10.0);
 
                     let connect_button = egui::Button::new(
-                        egui::RichText::new("Connect").color(egui::Color32::WHITE).size(15.0)
-                    )
+                    egui::RichText::new("Connect").color(egui::Color32::WHITE).size(15.0))
                     .fill(egui::Color32::from_rgb(0, 200, 0))
                     .min_size(egui::vec2(60.0, 30.0));
-
-                    //ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.add_space( 150.0);
-                            ui.style_mut().text_styles.insert(
-                                TextStyle::Body,
-                                FontId::new(15.0, egui::FontFamily::Proportional), // 24 logical points
-                            );
-                            ui.add_sized(
-                                egui::vec2(300.0, 30.0), // Width: 300, Height: 40
-                                egui::TextEdit::singleline(&mut self.address_text)
-                                .frame(true)
-                            );
-                            ui.add_space(20.0);
-
-                            if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button).clicked(){
-
-                                //check if inserted address is valid
-                                if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
-                                    self.is_address_valid = true;
-                                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
-                                    self.caster_addr = Some(caster_addr); 
-
-                                    let mut frames = self.received_frames.lock().unwrap();
-                                    frames.clear();  //clear the previous frame queue
-                                    drop(frames);
+            
+                    ui.style_mut().text_styles.insert(
+                        TextStyle::Body,
+                        FontId::new(15.0, egui::FontFamily::Proportional),
+                    );
+                    ui.add_sized(
+                        egui::vec2(300.0, 30.0), // Width: 300, Height: 30
+                        egui::TextEdit::singleline(&mut self.address_text)
+                        .frame(true)
+                    );
+                    ui.add_space(20.0);
                             
-                                    // Initialize receiver
-                                    //if self.receiver.is_none()  {  //&& !self.socket_created
-                                        let  (tx, rx) = channel();
-                                        
-                                        tokio::spawn(async move {
-                                            let receiver = Receiver::new(caster_addr).await;
+                            
+                    //if connect button is clicked
+                    if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button).clicked(){
 
-                                            let _ = tx.send(receiver);
-                                        });
+                        //check if inserted address is valid
+                        if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
+                            self.is_address_valid = true;
+                            let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
+                            self.caster_addr = Some(caster_addr); 
 
-                                        //store rx to poll it later to see if initialization completed, since the channel sender is async
-                                        self.receiver_rx = Some(rx); 
-                                        
-                                    //}
+                            let mut frames = self.received_frames.lock().unwrap();
+                            frames.clear();  //clear the previous frame queue
+                            drop(frames);
+                    
+                            let  (tx, rx) = channel();
 
-                                    //let tx_clone = tx.clone();
-                                    //tokio::spawn(async move {
-                                        /*
-                                        if !self.socket_created {
-                                        }
-                                        let socket = connect_to_sender(caster_addr).await;
-                                        match socket {
-                                            Ok(socket) => {
-                                                
-                                                println!("Connected to Sender");
+                            // Initialize receiver
+                            tokio::spawn(async move {
+                                let receiver = Receiver::new(caster_addr).await;
+                                let _ = tx.send(receiver);
+                            });
 
-                                                match recv_data(socket).await {
-                                                    Ok(frame) => {
-                                                        print!("Frame received from receiver");
-                                                        let _ = tx_clone.send(frame);
-                                                        drop(tx_clone);
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("Failed to receive data: {}", e);
-                                                    }
-                                                }
-                                                /*if let Err(e) = recv_data(caster_addr, socket).await {
-                                                    eprintln!("Failed to receive data: {}", e);
-                                                }*/
-                                            }
-                                            Err(e) => {
-                                                println!("No data received");
-                                                println!("{}", e);
-                                            }
-                                        }*/
-                                    //});
+                            //store rx to poll it later to see if initialization completed, since the channel sender is async
+                            self.receiver_rx = Some(rx); 
+                            self.is_receiving = true;
 
-                                    /*match rx.try_recv() { //eseguita anche se la socket non si è connessa
-                                        Ok(frame) => {
-                                            println!("Frame received from channel");
-                                            
-                                            let image: ColorImage =  egui::ColorImage::from_rgba_unmultiplied(
-                                                [frame.width as usize, frame.height as usize],
-                                                &frame.rgba_data );
+                        } else {
+                            self.is_address_valid = false;
+                        }    
+                    }
+                    //show Invalid IP Address message if the address is not valid
+                    if !self.is_address_valid {
+                        ui.add_space(20.0);
+                        ui.label(RichText::new("Invalid IP Address").color(Color32::RED).size(15.0));
+                        
+                    }
 
-                                            // Update texture
-                                            if let Some(ref mut texture) = self.display_texture {
-                                                texture.set(image, egui::TextureOptions::default());
-                                            } else {
-                                                self.display_texture = Some(ctx.load_texture(
-                                                    "display_texture",
-                                                    image,
-                                                    egui::TextureOptions::default(),
-                                                ));
-                                            }
+                } else { //receiving already started
 
-                                            let texture = self
-                                                .display_texture
-                                                .as_ref()
-                                                .unwrap_or(self.textures.get("error").unwrap());
-                                            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
-                                            
-                                        },
-                                        Err(_) => println!("the sender dropped or no data received"),
-                                    }*/
-                                    self.is_receiving = true;
-
-                                    // Add a loading indicator while waiting for receiver initialization
-                                    /*if self.receiver.is_none() {
-                                        ui.spinner(); // Show a spinner while connecting
-                                        ui.label("Connecting to sender...");
-                                    }*/ //non funziona
-
-                                } else {
-                                    self.is_address_valid = false;
-                                }
-                                
-                                //check if inserted address is valid
-                                /*if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
-                                    let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);    
-                                    
-                                    let (tx, rx) = channel();
-                                    self.frame_rx = Some(rx);
-
-                                    //let mut addr_vec: Vec<&str> = self.address_text.split(".").collect();
-                                    ///let port  = addr_vec[3].split(":").collect::<Vec<&str>>()[1];
-                                    ///addr_vec[3] = addr_vec[3].split(":").collect::<Vec<&str>>()[0];
-
-                                    /*let caster_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(
-                                        addr_vec[0].parse::<u8>().unwrap(), 
-                                        addr_vec[1].parse::<u8>().unwrap(), 
-                                        addr_vec[2].parse::<u8>().unwrap(), 
-                                        addr_vec[3].parse::<u8>().unwrap())), 
-                                        PORT);  //port.parse::<u16>().unwrap()*/
-                                    
-                                    //let  (tx, mut rx) = channel();
-                                    
-                                    tokio::spawn(async move {
-                                        let socket = connect_to_sender(caster_addr).await;
-                                        match socket {
-                                            Ok(socket) => {
-                                                println!("Connected to Sender");
-
-                                                match recv_data(socket).await {
-                                                    Ok(frame) => {
-                                                        println!("Received data");
-                                                        //let _ = tx.send(frame);
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("Failed to receive data: {}", e);
-                                                    }
-                                                }
-                                                /*if let Err(e) = recv_data(caster_addr, socket).await {
-                                                    eprintln!("Failed to receive data: {}", e);
-                                                }*/
-                                            }
-                                            Err(_) => {
-                                                println!("No data received");
-                                            }
-                                        }
-                                    });
-                                } 
-                                else {
-                                    ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                                }*/    
+                    ui.horizontal(|ui| {
+                        ui.vertical_centered(|ui| {
+                            let stop_button = egui::Button::new(
+                                egui::RichText::new("Stop").color(egui::Color32::WHITE).size(15.0)
+                            )
+                            .fill(egui::Color32::from_rgb(200, 0, 0))
+                            .min_size(egui::vec2(60.0, 30.0));
+                    
+                            if ui.add(stop_button).clicked() {
+                                self.stop_notify.notify_waiters();
+                                self.host_unreachable.store(false, Ordering::SeqCst);
+                                self.receiver = None;
+                                self.receiver_rx = None;
+                                self.display_texture = None;
+                                self.is_receiving = false;
+                                let mut frames = self.received_frames.lock().unwrap();
+                                frames.clear();
+                                self.last_frame_time = None;
+                                self.frame_times.clear();
+                                self.current_fps = 0.0;
                             }
                             
-                            
                         });
-                        if !self.is_address_valid {
-                            ui.label(RichText::new("Invalid IP Address").color(Color32::RED));
-                            
-                        }
-    
-                    //});
-                } else {
-
-                    let stop_button = egui::Button::new(
-                        egui::RichText::new("Stop").color(egui::Color32::WHITE).size(15.0)
-                    )
-                    .fill(egui::Color32::from_rgb(200, 0, 0))
-                    .min_size(egui::vec2(60.0, 30.0));
                     
-                    if ui.add(stop_button).clicked() {
-                        println!("Stop clicked");
-                        self.stop_notify.notify_waiters(); //in this way recv_data releases the lock
-                        self.host_unreachable.store(false, Ordering::SeqCst); //restore host unreachable value 
-                        
-                        self.receiver = None;
-                        self.receiver_rx = None;
-                        self.display_texture = None;
-                        self.is_receiving = false;
-                
-                        let mut frames = self.received_frames.lock().unwrap();
-                        frames.clear();  //clear the frame queue
-                        self.last_frame_time = None;
-                        self.frame_times.clear();
-                        self.current_fps = 0.0;
-                    }
-                    ui.add_space(10.0);
-                }
+                        // Push "Start Recording" to the right
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(10.0);
+                            self.render_recording_controls(ui);
 
+                            ui.add_space(5.0);
+                            if self.action_button(ui, "⚙ Recording Settings", HotkeyAction::ClosePopup) {
+                                self.show_config = true;
+                            }
+                        });
+                        
+                    });
+                }
+                //show Host Unreachable message if the host is unreachable
                 if self.host_unreachable.load(Ordering::SeqCst) {
-                    ui.label(RichText::new("Host Unreachable").color(Color32::RED));
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("Host Unreachable").color(Color32::RED).size(15.0));
                 }
     
                 // Check if we have a pending receiver initialization
@@ -1060,7 +942,6 @@ impl RustreamApp {
                         }
                         Err(TryRecvError::Closed) => {
                             ui.label(RichText::new("Failed to receive receiver from channel").color(Color32::RED));
-                            //self.socket_created = false;
                             self.receiver_rx = None;
                         }
                     }
@@ -1075,128 +956,86 @@ impl RustreamApp {
 
                     let rcv_frames = self.received_frames.clone();
 
-                    //if let Some(caster_addr) = self.caster_addr {
-                        let stop_notify = self.stop_notify.clone();
-                        let host_unreachable = self.host_unreachable.clone();
                     
-                        tokio::spawn(async move {
+                    let stop_notify = self.stop_notify.clone();
+                    let host_unreachable = self.host_unreachable.clone();
+                
+                    tokio::spawn(async move {
+                        
+                        let receiver = receiver_clone.lock().await;
+                        
+                        //start receiving only if it's the first time 
+                        if !receiver.started_receiving {                                 
+                            drop(receiver); //drop the lock before starting the receiving task
+                            start_receiving(rcv_frames, receiver_clone, stop_notify, host_unreachable).await;                                
+                        }
+                    }); 
+
+                    let frame = { //in this way the lock is released immediately
+                        let mut frames = self.received_frames.lock().unwrap();
+                        //println!("Frame queue lock 2 acquired");
+                        //println!("Frame queue size before pop: {}", frames.len());
+                        frames.pop_front()
+                    };
+                    //let mut frames = self.received_frames.lock().unwrap();
+                    
+                    if let Some(frame) = frame {
+                        //println!("Frame popped from mutex");
+                        //self.frame_rx = None;
+                        //println!("Frame received from mutex");
+
+                        if self.video_recorder.is_recording() {
+                            self.video_recorder.record_frame(&frame);
+                        }
+
+                        let image = egui::ColorImage::from_rgba_unmultiplied(
+                            [frame.width, frame.height], 
+                            &frame.rgba_data
+                        );
+                        //println!("image created");
+                        
+                        // Update FPS counter
+                        let now = std::time::Instant::now();
+                        if let Some(last_frame_time) = self.last_frame_time {
+                            let frame_time = now.duration_since(last_frame_time);
+                            self.frame_times.push_back(frame_time);
                             
-                            let receiver_clone2 = Arc::clone(&receiver_clone);
-                            let receiver = receiver_clone.lock().await;
-                            //let frame;
-                            
-                            //let rx = receiver.frame_rx.take();
-                            
-                            //caster address changed, stop previous streaming and start the new one
-                            /*if receiver.caster != caster_addr { 
-                                receiver.caster = caster_addr;
-                                drop(receiver);
-                                println!("Caster address changed, reconnecting to new sender");
-                                //connect the socket to the new address and start receiving
-                                start_receiving(rcv_frames, receiver_clone2, false, stop_notify).await;
-                              */
-                              //start receiving only if it's the first time
-                            //} else 
-                            if !receiver.started_receiving { 
-                                //drop the lock before starting the receiving task
-                                drop(receiver);
-                                //println!("Receiving from the same sender");
-                                start_receiving(rcv_frames, receiver_clone2, stop_notify, host_unreachable).await;
-                                
+                            // Keep only last 60 frame times for moving average
+                            if self.frame_times.len() > 60 {
+                                self.frame_times.pop_front();
                             }
-                            //println!("After start_receiving completed");
-                            /*if let Some(frame) = frame {
-                                println!("Frame received from start_receiving");
-                                let mut frames = rcv_frames.lock().unwrap();
-                                println!("Frame queue length: {}", frames.len());
-                                frames.push_back(frame); //insert new frame in the queue
-                                //self.frame_ready = true; //come mantengo questo stato?
-                                //println!("Frame queue lock 1 acquired");
-
-                                /*match tx.send(frame) {
-                                    Ok(_) => println!("🔍 Frame successfully sent to channel"),
-                                    Err(_) => println!("❌ Failed to send frame to channel"),
-                                }*/
-                            }*/
-                            /*let rcv = rcv_clone.lock().await;
-                            println!("last Lock on receiver acquired");
-                            let mut frame_vec = rcv.frames.lock().await; 
-                            println!("Lock on frames acquired");
-                            println!("Frame queue length: {}", frame_vec.len());
-                            if let Some(frame) = frame_vec.pop_front(){ // retrieve the oldest frame first  
-                                println!("Frame popped from queue");
-                                drop(frame_vec);
-                                //let _ = tx_clone.send(frame);
-                            }*/
-                        }); 
-
-                        
-                        //while let Some(rx) = &mut self.frame_rx {
-                        
-                            //if let Ok(frame) = rx.try_recv() {
-                            let frame = { //in this way the lock is released immediately
-                                let mut frames = self.received_frames.lock().unwrap();
-                                //println!("Frame queue lock 2 acquired");
-                                //println!("Frame queue size before pop: {}", frames.len());
-                                frames.pop_front()
-                            };
-                            //let mut frames = self.received_frames.lock().unwrap();
                             
-                                if let Some(frame) = frame {
-                                    //println!("Frame popped from mutex");
-                                    //self.frame_rx = None;
-                                    //println!("Frame received from mutex");
-                                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                                        [frame.width, frame.height], 
-                                        &frame.rgba_data
-                                    );
-                                    //println!("image created");
-                                    
-                                    // Update FPS counter
-                                    let now = std::time::Instant::now();
-                                    if let Some(last_frame_time) = self.last_frame_time {
-                                        let frame_time = now.duration_since(last_frame_time);
-                                        self.frame_times.push_back(frame_time);
-                                        
-                                        // Keep only last 60 frame times for moving average
-                                        if self.frame_times.len() > 60 {
-                                            self.frame_times.pop_front();
-                                        }
-                                        
-                                        // Calculate average FPS
-                                        if !self.frame_times.is_empty() {
-                                            let avg_frame_time: std::time::Duration = self.frame_times.iter().sum::<std::time::Duration>() 
-                                                / self.frame_times.len() as u32;
-                                            self.current_fps = 1.0 / avg_frame_time.as_secs_f32();
-                                        }
-                                    }
-                                    self.last_frame_time = Some(now);
+                            // Calculate average FPS
+                            if !self.frame_times.is_empty() {
+                                let avg_frame_time: std::time::Duration = self.frame_times.iter().sum::<std::time::Duration>() 
+                                    / self.frame_times.len() as u32;
+                                self.current_fps = 1.0 / avg_frame_time.as_secs_f32();
+                            }
+                        }
+                        self.last_frame_time = Some(now);
 
-                                    // Update texture
-                                    if let Some(ref mut texture) = self.display_texture {
-                                        texture.set(image, egui::TextureOptions::default());
-                                        println!("texture updated");
-                                    } else {
-                                        self.display_texture = Some(ctx.load_texture(
-                                            "display_texture",
-                                            image,
-                                            egui::TextureOptions::default(),
-                                        ));
-                                        println!("texture loaded");
-                                    }
-                                    
-                                } 
-                                else {
-                                    // Add a loading indicator while waiting for receiver initialization
-                                    if self.receiver.is_none() {
-                                        ui.spinner(); // Show a spinner while connecting
-                                        ui.label("Connecting to sender...");
-                                    }
-                                }  
-                                ctx.request_repaint();                 
-                        //}
-                    //} 
-
+                        // Update texture
+                        if let Some(ref mut texture) = self.display_texture {
+                            texture.set(image, egui::TextureOptions::default());
+                            //println!("texture updated");
+                        } else {
+                            self.display_texture = Some(ctx.load_texture(
+                                "display_texture",
+                                image,
+                                egui::TextureOptions::default(),
+                            ));
+                            println!("texture loaded");
+                        }
+                            
+                    } else {
+                        // Add a loading indicator while waiting for receiver initialization
+                        if self.display_texture.is_none() && !self.host_unreachable.load(Ordering::SeqCst){
+                            ui.add_space(40.0);
+                            ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
+                            ui.label(RichText::new("Connecting to sender...").size(15.0));
+                        }
+                    }  
+                    ctx.request_repaint();                 
                     
                     /*tokio::spawn(async move {
                         let rcv = rcv_clone.lock().await;
@@ -1256,7 +1095,7 @@ impl RustreamApp {
         // Create button with fixed minimum size and hover text
         let response = ui.add_sized(
             min_size,
-            egui::Button::new(label.to_string())
+            egui::Button::new(egui::RichText::new(label.to_string()).size(15.0))
         ).on_hover_text(format!("{}{}", label, hotkey_text));
     
 
@@ -1293,6 +1132,18 @@ impl RustreamApp {
             .on_hover_cursor(egui::CursorIcon::PointingHand);
 
         response.clicked() || self.triggered_actions.contains(&action)
+    }
+
+    fn show_fps_counter(&self, ctx: &Context, ui: &mut egui::Ui) {
+        egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.current_fps > 0.0 {
+                        ui.colored_label(egui::Color32::GREEN, format!("FPS: {:.1}", self.current_fps));
+                    }
+                });
+            });
+        });
     }
 
     /// Add a texture to the texture map
@@ -1365,7 +1216,7 @@ impl eframe::App for RustreamApp {
 
             PageView::Caster => self.caster_page(ui, ctx, frame),
 
-            PageView::Receiver => self.receiver_page(ctx),
+            PageView::Receiver => self.receiver_page(ctx, ui),
         });
 
         self.triggered_actions.clear();
