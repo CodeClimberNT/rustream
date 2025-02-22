@@ -1,7 +1,7 @@
 use super::{CaptureArea, CapturedFrame};
 use crate::config::Config;
 use image::{ImageBuffer, RgbaImage};
-use log::{debug, error, warn};
+use log::{debug, error};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
@@ -73,7 +73,6 @@ impl ScreenCapture {
             self.height = monitor.height();
             self.width = monitor.width();
             debug!("Monitor dimensions: {}x{}", self.width, self.height);
-            debug!("Monitor dimensions: {}x{}", self.width, self.height);
 
             self.capturer = match Capturer::new(monitor) {
                 Ok(cap) => Some(cap),
@@ -95,7 +94,6 @@ impl ScreenCapture {
             )),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => {
-                    debug!("Frame not ready; skipping this frame.");
                     debug!("Frame not ready; skipping this frame.");
                     None
                 }
@@ -162,8 +160,7 @@ impl ScreenCapture {
                             current_dimensions = (width, height);
                         }
                         Err(e) => {
-                            error!("Failed to initialize Capturer: {:?}", e);
-                            thread::sleep(std::time::Duration::from_millis(100));
+                            error!("{}", CaptureError::InitError(e.to_string()));
                             return;
                         }
                     };
@@ -200,7 +197,7 @@ impl ScreenCapture {
 
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
-                                debug!("Frame not ready; skipping this frame.");
+                                // debug!("Frame not ready; skipping this frame.");
                             }
                             std::io::ErrorKind::ConnectionReset => {
                                 error!(

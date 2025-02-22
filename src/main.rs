@@ -11,6 +11,8 @@ mod data_streaming;
 mod hotkey;
 mod screen_capture;
 mod video_recorder;
+mod metrics;
+
 
 use app::RustreamApp;
 use area_capture::AreaCaptureApp;
@@ -25,7 +27,7 @@ const APP_TITLE: &str = "RUSTREAM";
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)

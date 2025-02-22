@@ -1,17 +1,18 @@
+use log::debug;
 use std::collections::VecDeque;
 use std::env;
-use std::io::ErrorKind::{self, WouldBlock, ConnectionReset};
+use std::io::ErrorKind::{self, ConnectionReset, WouldBlock};
 use std::io::Write;
-use std::mem;
 use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
 
+use crate::metrics::StreamingMetrics;
 use crate::screen_capture::CapturedFrame;
 
 pub const PORT: u16 = 56123;
@@ -21,7 +22,7 @@ const FRAME_ID_SIZE: usize = size_of::<u32>(); // Size of frame_id, 4
 
 pub struct Sender {
     socket: Arc<UdpSocket>,
-    receivers: Arc<Mutex<Vec<SocketAddr>>>,
+    pub receivers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: Arc<Mutex<u32>>,
     started_sending: bool,
     //serve pure il frame da mandare? o il buffer di frames?
@@ -34,16 +35,7 @@ impl Sender {
         let addr = format!("0.0.0.0:{}", PORT);
         let sock = UdpSocket::bind(addr).await.unwrap();
         println!("Socket {} ", sock.local_addr().unwrap());
-        /*let sock = match sock {
-            Ok(socket) => socket,
-            Err(_) => {
-                println!("Failed to bind socket  to port 50000, binding to default port");
-                let default_sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-                println!("Socket bound to port {}",  default_sock.local_addr().unwrap().port()); //.to_string()?
-                default_sock
-            }
-            //sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-        };*/
+
         Self {
             socket: Arc::new(sock),
             receivers: Arc::new(Mutex::new(Vec::new())),
@@ -53,18 +45,16 @@ impl Sender {
     }
 
     pub async fn listen_for_receivers(&self) {
-        
         let receivers = self.receivers.clone();
         let socket = self.socket.clone();
 
         tokio::spawn(async move {
-            
             loop {
                 let mut buf = [0; 1472];
-                match socket.recv_from(&mut buf).await { //recv_from to receive from different clients
-                    Ok((_, peer_addr)) => {                        
-                        if let Ok(message) = from_utf8(&buf) {                        
-
+                match socket.recv_from(&mut buf).await {
+                    //recv_from to receive from different clients
+                    Ok((_, peer_addr)) => {
+                        if let Ok(message) = from_utf8(&buf) {
                             if message.trim_matches('\0') == "REQ_FRAMES" {
                                 println!("Received connection request from: {}", &peer_addr);
                                 let mut receivers = receivers.lock().await;
@@ -85,13 +75,7 @@ impl Sender {
 
                     Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                         eprintln!("Connection reset by peer: {}", e);
-                        // Handle connection reset, possibly retry connection
-                        /*let buffer = "TRY_RECONNECTION".as_bytes();
-                        if let Err(_)  = socket.try_send(buffer) {
-                            //Ok(_) => Ok(socket),
-                           eprintln!("Failed to reconnect to receiver");
-                        }*/
-                    },
+                    }
                     Err(e) => eprintln!("Error receiving connection: {}", e),
                 }
             }
@@ -103,16 +87,30 @@ impl Sender {
         frame: CapturedFrame,
         frame_id: Arc<Mutex<u32>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let metrics = Arc::new(StreamingMetrics::new());
+        let start_time = Instant::now();
+
         let receivers = self.receivers.lock().await;
         if receivers.is_empty() {
             println!("No receivers connected");
             return Ok(()); // Return early if no receivers
         }
-        let start = Instant::now();
-        let encoded_frame = frame.encode_to_h265()?;
-        let encode_time = start.elapsed();
-        println!("Encoding time: {:?}", encode_time);
-        println!("Frame encoded to h265");
+        let (duration, encoded_frame) =
+            metrics.time_operation(&metrics.encode, || frame.encode_to_h265());
+
+        let encoded_frame = encoded_frame?;
+        debug!("Encoding time: {:?}", duration);
+        debug!("Frame encoded to h265");
+
+        metrics
+            .encode
+            .avg_duration
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        metrics.encode.total_frames.fetch_add(1, Ordering::Relaxed);
+        metrics.encode.fps.store(
+            (1_000_000.0 / duration.as_micros() as f64) as u64,
+            Ordering::Relaxed,
+        );
 
         //loop {
 
@@ -126,6 +124,10 @@ impl Sender {
             .ceil() as u16;
         println!("Total chunks: {:?}", total_chunks);
 
+        // let encoded_size = encoded_frame.len();
+        let mut total_sent = 0;
+        let mut packets_dropped = 0;
+
         for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
             let mut pkt = Vec::new();
             pkt.extend_from_slice(&seq_num.to_ne_bytes()); //&seq_num.to_ne_bytes()
@@ -134,36 +136,55 @@ impl Sender {
             pkt.extend_from_slice(chunk);
 
             for &peer in receivers.iter() {
-                if let Err(e) = self.socket.send_to(&pkt, peer).await {
-                    eprintln!("Error sending to {}: {}", peer, e);
+                match self.socket.send_to(&pkt, peer).await {
+                    Ok(sent) => {
+                        total_sent += sent;
+                        if sent < pkt.len() {
+                            packets_dropped += 1;
+                        }
+                        println!("Sent chunk {:?} to peer {}", seq_num, peer);
+                    }
+
+                    Err(e) => {
+                        eprintln!("Error sending to {}: {}", peer, e);
+                        packets_dropped += 1;
+                        metrics
+                            .encode
+                            .dropped_frames
+                            .fetch_add(1, Ordering::Relaxed);
+                    } //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
                 }
-                println!("Sent chunk {:?} to peer {}", seq_num, peer);
-                //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
             }
             seq_num += 1;
         }
+        let elapsed = start_time.elapsed();
+        metrics.network.bandwidth.store(
+            (total_sent as f64 / elapsed.as_secs_f64()) as u64,
+            Ordering::Relaxed,
+        );
+
+        metrics.network.packet_loss.store(
+            ((packets_dropped as f64 / total_chunks as f64) * 100.0) as u64,
+            Ordering::Relaxed,
+        );
+
         drop(encoded_frame);
         Ok(())
     }
 }
 
-pub async fn start_streaming(sender: Arc<Mutex<Sender>>, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_streaming(
+    sender: Arc<Mutex<Sender>>,
+    frame: CapturedFrame,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Start listening for new receivers in the background
-    let sender_clone = sender.clone();
-    //let sender_clone1 = sender.clone();
+    // let sender_clone = sender.clone();
     let mut sender = sender.lock().await;
     if !sender.started_sending {
         sender.started_sending = true;
-        //drop(sender);
-        //tokio::spawn(async move {
-            //let sender = sender_clone.lock().await;
-            sender.listen_for_receivers().await;
-            //drop(sender);
-        //});       
+        sender.listen_for_receivers().await;
     }
-    //let sender1 = sender_clone.lock().await;
-    //println!("Sender1 lock acquired");
-    
+
     let frame_id = sender.frame_id.clone();
 
     return match sender.send_data(frame, frame_id).await {

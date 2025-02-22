@@ -41,7 +41,7 @@
     dirs = { version = "6.0.0", default-features = false }
 
     # Utilities
-    log = { version = "0.4.22", default-features = false }
+    log = { version = "0.4.26", default-features = false }
     env_logger = { version = "0.11.6", default-features = false }
 
 
