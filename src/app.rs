@@ -578,12 +578,7 @@ impl RustreamApp {
                             }
                         });
                 });
-
-                // Audio settings
-                ui.heading("Audio Settings");
-                ui.separator();
-
-                
+   
                 // Apply changes if the config has changed
                 let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
                 if has_config_changed {
@@ -592,6 +587,65 @@ impl RustreamApp {
                     self.frame_grabber.reset_capture();
                 }
             });
+        self.show_config = show_config;
+    }
+
+    fn render_recording_settings(&mut self, ctx: &Context) {
+        let mut show_config = self.show_config;
+
+        Window::new("Configuration")
+            .open(&mut show_config)
+            .resizable(true)
+            .movable(true)
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .outer_margin(0.0)
+                    .inner_margin(10.0),
+            )
+            .show(ctx, |ui| {
+            let mut config = self.config.lock().unwrap().clone();
+        
+            ui.heading("Recording Settings");
+            ui.separator();
+        
+            // Output path configuration
+            ui.horizontal(|ui| {
+                ui.label("Output path:");
+                let mut recording_path = config.video.output_path.to_string_lossy().into_owned();
+                ui.text_edit_singleline(&mut recording_path)
+                    .on_hover_text(recording_path.clone());
+                if ui.button("📂").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("Save recording as...")
+                        .set_file_name("output.mkv")
+                        .add_filter("Matroska Video", &["mkv"])
+                        .save_file()
+                    {
+                        config.video.output_path = path;
+                    }
+                }
+            });
+        
+            // FPS settings
+            ui.horizontal(|ui| {
+                ui.label("Target FPS:");
+                ComboBox::from_label("")
+                    .selected_text(format!("{} FPS", config.video.fps))
+                    .show_ui(ui, |ui| {
+                        for &fps in &[24, 25, 30, 50, 60] {
+                            ui.selectable_value(&mut config.video.fps, fps, format!("{} FPS", fps));
+                        }
+                    });
+            });
+        
+            // Apply changes if the config has changed
+            let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
+            if has_config_changed {
+                self.config.lock().unwrap().update(config);
+                self.frame_grabber.reset_capture();
+            }
+        });
+
         self.show_config = show_config;
     }
 
@@ -819,6 +873,8 @@ impl RustreamApp {
     pub fn receiver_page(&mut self, ctx: &Context, ui: &mut Ui) {
 
         self.show_fps_counter(ctx, ui);
+
+        self.render_recording_settings(ctx); //non funziona, c'è qualcosa che non ha id unico
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Receiver Mode");
