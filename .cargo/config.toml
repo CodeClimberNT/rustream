@@ -4,10 +4,8 @@
     brt = "build --release --timings"
     rr = "run --release"
 
-
 [build]
     jobs = -1
-
 
 [env]
     # RUST_LOG = "info"

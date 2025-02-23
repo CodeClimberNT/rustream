@@ -203,7 +203,8 @@ impl ScreenCapture {
                 }
                 thread::sleep(std::time::Duration::from_millis(1000 / 6));
             }
-            println!("Capture thread stopped");
+            debug!("Capture thread stopped");
+            stop_capture.store(false, Ordering::SeqCst);
         });
     }
 }

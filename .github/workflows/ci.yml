@@ -2,7 +2,7 @@ name: Rust CI/CD
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "v*"]
   pull_request:
   workflow_dispatch:
 
@@ -50,7 +50,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Fetch dependencies
-        run: cargo fetch
+        run: |
+          cargo fetch
+          cargo check --all-features
 
       - name: Run tests
         run: cargo test --verbose
@@ -59,10 +61,10 @@ jobs:
         shell: bash
         run: |
             if [ "${{ runner.os }}" == "Windows" ]; then
-            export RUSTFLAGS="-A warnings"
-            cargo build --release
+              export RUSTFLAGS="-A warnings"
+              cargo build --release
             else
-            RUSTFLAGS="-A warnings" cargo build --release
+              RUSTFLAGS="-A warnings" cargo build --release
             fi
 
       - name: Rename binary

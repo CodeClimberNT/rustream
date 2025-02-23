@@ -44,13 +44,9 @@
     log = { version = "0.4.26", default-features = false }
     env_logger = { version = "0.11.6", default-features = false }
 
-
     thiserror = { version = "2.0.11", default-features = false }
 
-
-    rfd = { version = "0.15.1", features = [
-        "xdg-portal",
-    ], default-features = false }
+    rfd = { version = "0.15.1", features = ["gtk3"], default-features = false }
 
     serde = { version = "1.0.218", features = [
         "derive",
@@ -64,9 +60,13 @@
     # Decoding
     regex = "1.5"
     tokio = { version = "1.42.0", features = ["full"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
     async-lock = { version = "3.4.0", features = [
         "std",
     ], default-features = false }
+    zbus = { version = "5.5.0", default-features = false, features = ["tokio"] }
+
 
 [profile.dev]
     opt-level = 1
