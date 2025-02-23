@@ -41,7 +41,7 @@
     dirs = { version = "6.0.0", default-features = false }
 
     # Utilities
-    log = { version = "0.4.22", default-features = false }
+    log = { version = "0.4.26", default-features = false }
     env_logger = { version = "0.11.6", default-features = false }
 
 
@@ -63,8 +63,14 @@
 
     # Decoding
     regex = "1.5"
-    tokio = { version = "1.42.0", features = ["full"] }
+    tokio = { version = "1.42.0", features = ["full"], optional = true }
+    async-process = { version = "2.3.0", optional = true }
+    async-lock = { version = "3.4.0", optional = true }
 
+[features]
+    default = ["tokio"]
+    tokio = ["dep:tokio"]
+    no-tokio = ["dep:async-process", "dep:async-lock"]
 
 [profile.dev]
     opt-level = 1
