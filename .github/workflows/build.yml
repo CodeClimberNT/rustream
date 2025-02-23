@@ -1,4 +1,4 @@
-name: Rust CI
+name: Rust Release
 
 on:
   push:
@@ -7,27 +7,55 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  BINARY_NAME: rustream
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: rustream-linux
+            asset_name: rustream-linux-amd64
+          - os: windows-latest
+            artifact_name: rustream-windows.exe
+            asset_name: rustream-windows-amd64.exe
+          - os: macos-latest
+            artifact_name: rustream-macos
+            asset_name: rustream-macos-amd64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          toolchain: stable
+          components: clippy, rustfmt
 
-      - name: Cache Cargo index
-        uses: actions/cache@v4
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp target/release/${{ env.BINARY_NAME }}.exe ${{ matrix.artifact_name }}
+          else
+            cp target/release/${{ env.BINARY_NAME }} ${{ matrix.artifact_name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build
-        run: cargo build --verbose
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.artifact_name }}
 
   release:
     needs: build
@@ -36,23 +64,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-
-      - name: Build release binary
-        run: cargo build --release
-
       - name: Get latest tag
         id: get_tag
         run: |
           git fetch --tags
-          tag=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
       - name: Calculate next version
         id: next_version
         run: |
-          IFS='.' read -ra PARTS <<< "${${{ steps.get_tag.outputs.latest_tag }}#v}"
+          current_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          current_tag="${current_tag#v}"
+          IFS='.' read -ra PARTS <<< "$current_tag"
           major=${PARTS[0]:-0}
           minor=${PARTS[1]:-0}
           patch=${PARTS[2]:-0}
@@ -60,12 +84,18 @@ jobs:
           new_version="$major.$minor.$patch"
           echo "version=$new_version" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.next_version.outputs.version }}
-          name: "v${{ steps.next_version.outputs.version }}"
-          prerelease: true
-          files: ./target/release/your_binary_name
+          name: Release v${{ steps.next_version.outputs.version }}
+          files: |
+            rustream-linux-amd64
+            rustream-windows-amd64.exe
+            rustream-macos-amd64
           draft: false
+          prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
