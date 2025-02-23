@@ -173,12 +173,6 @@ impl ScreenCapture {
                 if let Some(ref mut cap) = capturer {
                     match cap.frame() {
                         Ok(raw_frame) => {
-                            // let img_buffer: RgbaImage = ImageBuffer::from_raw(
-                            //     current_dimensions.0,
-                            //     current_dimensions.1,
-                            //     raw_frame.to_vec(),
-                            // )
-                            // .expect("Couldn't create image buffer from raw frame");
 
                             let img_buffer: RgbaImage = ImageBuffer::from_raw(
                                 current_dimensions.0,
