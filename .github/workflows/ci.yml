@@ -1,8 +1,9 @@
-name: Rust Release
+name: Rust CI/CD
 
 on:
   push:
     branches: ["main"]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -39,10 +40,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
 
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --verbose
+
       - name: Build Release Binary
         run: cargo build --release
 
       - name: Rename binary
+        if: github.ref == 'refs/heads/main'
         shell: bash
         run: |
           if [ "${{ runner.os }}" == "Windows" ]; then
@@ -52,6 +66,7 @@ jobs:
           fi
 
       - name: Upload artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
@@ -85,7 +100,7 @@ jobs:
           echo "version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
