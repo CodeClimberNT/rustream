@@ -1,9 +1,10 @@
-use super::RgbaBuffer;
 // use image::{ImageBuffer, RgbaImage};
 use image::{GenericImageView, ImageBuffer, RgbaImage};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+
+use crate::common::RgbaBuffer;
 
 #[derive(Debug, Default, Clone)]
 pub struct CapturedFrame {

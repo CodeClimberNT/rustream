@@ -33,6 +33,11 @@ impl eframe::App for AreaCaptureApp {
 
         let scale_factor = ctx.pixels_per_point();
 
+        // Get display info
+        let display_size = ctx.screen_rect().size();
+        let display_width = (display_size.x * scale_factor).round() as usize;
+        let display_height = (display_size.y * scale_factor).round() as usize;
+
         // Add tutorial window
         egui::Window::new("Tutorial")
             .fixed_pos([10.0, 10.0])
@@ -138,7 +143,11 @@ impl eframe::App for AreaCaptureApp {
                                             )
                                             .clicked()
                                         {
-                                            let output = CaptureArea::from_rect(rect);
+                                            let output = CaptureArea::from_rect_safe(
+                                                rect,
+                                                display_width,
+                                                display_height,
+                                            );
 
                                             let output_with_status = json!({
                                                 "status": "success",

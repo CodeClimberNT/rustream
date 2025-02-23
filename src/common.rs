@@ -2,7 +2,7 @@ use egui::Rect;
 use serde::{Deserialize, Serialize};
 
 pub type RgbaBuffer = Vec<u8>;
-pub type BgraBuffer = Vec<u8>;
+// pub type BgraBuffer = Vec<u8>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 pub struct CaptureArea {
@@ -13,23 +13,23 @@ pub struct CaptureArea {
 }
 
 impl CaptureArea {
-    pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
+    // pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
+    //     Self {
+    //         x,
+    //         y,
+    //         width,
+    //         height,
+    //     }
+    // }
 
-    pub fn from_rect(rect: Rect) -> Self {
-        Self {
-            x: rect.min.x.round() as usize,
-            y: rect.min.y.round() as usize,
-            width: rect.width().round() as usize,
-            height: rect.height().round() as usize,
-        }
-    }
+    // pub fn from_rect(rect: Rect) -> Self {
+    //     Self {
+    //         x: rect.min.x.round() as usize,
+    //         y: rect.min.y.round() as usize,
+    //         width: rect.width().round() as usize,
+    //         height: rect.height().round() as usize,
+    //     }
+    // }
 
     pub fn new_with_safeguards(
         x: usize,
@@ -67,6 +67,30 @@ impl CaptureArea {
                 height,
             }
         }
+    }
+
+    pub fn from_rect_safe(rect: Rect, display_width: usize, display_height: usize) -> Self {
+        // Ensure positive width and height by normalizing the rect
+        let (min_x, max_x) = if rect.min.x <= rect.max.x {
+            (rect.min.x, rect.max.x)
+        } else {
+            (rect.max.x, rect.min.x)
+        };
+
+        let (min_y, max_y) = if rect.min.y <= rect.max.y {
+            (rect.min.y, rect.max.y)
+        } else {
+            (rect.max.y, rect.min.y)
+        };
+
+        Self::new_with_safeguards(
+            min_x.round() as usize,
+            min_y.round() as usize,
+            (max_x - min_x).round() as usize,
+            (max_y - min_y).round() as usize,
+            display_width,
+            display_height,
+        )
     }
 
     pub fn full(buffer_width: usize, buffer_height: usize) -> Self {
