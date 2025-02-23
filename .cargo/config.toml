@@ -1,15 +1,15 @@
 [alias]
-br = "build --release"
-bt = "build --timings"
-brt = "build --release --timings"
+    br = "build --release"
+    bt = "build --timings"
+    brt = "build --release --timings"
+    rr = "run --release"
 
 
 [build]
-jobs = -1
-
+    jobs = -1
 
 
 [env]
-# RUST_LOG = "info"
-# RUST_BACKTRACE = "true"
-# RUST_BACKTRACE = "full"
+    # RUST_LOG = "info"
+    # RUST_BACKTRACE = "true"
+    # RUST_BACKTRACE = "full"
