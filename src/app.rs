@@ -593,7 +593,7 @@ impl RustreamApp {
                 ComboBox::from_label("")
                     .selected_text(format!("{} FPS", config.video.fps))
                     .show_ui(ui, |ui| {
-                        for &fps in &[24, 25, 30, 50, 60] {
+                        for &fps in &[6, 24, 25, 30, 50, 60] {
                             ui.selectable_value(&mut config.video.fps, fps, format!("{} FPS", fps));
                         }
                     });

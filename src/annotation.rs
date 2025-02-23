@@ -36,6 +36,7 @@ enum Tool {
     Arrow,
     FreeHand,
     Text,
+    Eraser,
 }
 
 pub struct AnnotationApp {
@@ -115,6 +116,12 @@ impl eframe::App for AnnotationApp {
                 {
                     self.current_tool = Tool::Text;
                 }
+                if ui
+                    .selectable_label(self.current_tool == Tool::Eraser, "Eraser")//TODO: add icon
+                    .clicked()
+                {
+                    self.current_tool = Tool::Eraser;
+                }
 
                 ui.separator();
 
@@ -173,16 +180,26 @@ impl eframe::App for AnnotationApp {
         }
 
         CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                let response =
-                    ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
+                let response = ui.allocate_rect(
+                    ui.available_rect_before_wrap(),
+                    egui::Sense::click_and_drag(),
+                );
                 let pointer_pos = response
                     .interact_pointer_pos()
                     .map(|pos| egui::pos2(pos.x * scale_factor, pos.y * scale_factor));
 
-                // Handle drawing start
-                if response.drag_started() {
+                // Handle text tool separately
+                if self.current_tool == Tool::Text && response.clicked() {
+                    if let Some(pos) = pointer_pos {
+                        self.show_text_input = true;
+                        self.text_position = Some(pos);
+                        self.temp_text.clear();
+                    }
+                }
+                // Handle other tools
+                else if response.drag_started() {
                     if let Some(pos) = pointer_pos {
                         self.drag_start = Some(pos);
                         self.is_drawing = true;
@@ -240,32 +257,92 @@ impl eframe::App for AnnotationApp {
                                     }
                                 }
                             }
+                            Tool::Eraser => {
+                                // Find indices of shapes to remove
+                                let indices_to_remove: Vec<usize> = self
+                                    .annotations
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, shape)| {
+                                        AnnotationApp::shape_contains_point(
+                                            shape,
+                                            current_pos,
+                                            scale_factor,
+                                        )
+                                    })
+                                    .map(|(i, _)| i)
+                                    .collect();
+                                // Remove shapes in reverse order to maintain correct indices
+                                for &i in indices_to_remove.iter().rev() {
+                                    self.annotations.remove(i);
+                                }
+                            }
                         }
                     }
                 }
 
+                // Text input window - Moved outside the main panel
                 if self.show_text_input {
-                    egui::Window::new("Add Text")
+                    let mut show = true;
+                    egui::Window::new("Write your text")
+                        .open(&mut show)
                         .collapsible(false)
                         .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                         .show(ctx, |ui| {
-                            ui.text_edit_singleline(&mut self.temp_text);
-                            ui.horizontal(|ui| {
-                                if ui.button("OK").clicked() && !self.temp_text.is_empty() {
-                                    if let Some(pos) = self.text_position {
-                                        self.annotations.push(Shape::Text {
-                                            position: pos,
-                                            content: self.temp_text.clone(),
-                                            color: self.current_color,
-                                        });
+                            ui.vertical_centered_justified(|ui| {
+                                ui.add_space(8.0);
+                                // Text input with larger size
+                                ui.add_sized(
+                                    [200.0, 30.0],
+                                    egui::TextEdit::singleline(&mut self.temp_text)
+                                        .hint_text("Type your text here..."),
+                                );
+                                ui.add_space(8.0);
+
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Insert")
+                                                    .size(16.0)
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(Color32::from_rgb(0, 150, 0))
+                                            .min_size(egui::vec2(80.0, 30.0)),
+                                        )
+                                        .clicked() && !self.temp_text.is_empty() {
+                                        if let Some(pos) = self.text_position {
+                                            self.annotations.push(Shape::Text {
+                                                position: pos,
+                                                content: self.temp_text.clone(),
+                                                color: self.current_color,
+                                            });
+                                        }
+                                        self.show_text_input = false;
                                     }
-                                    self.show_text_input = false;
-                                }
-                                if ui.button("Cancel").clicked() {
-                                    self.show_text_input = false;
-                                }
+
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Cancel")
+                                                    .size(16.0)
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(Color32::from_rgb(150, 0, 0))
+                                            .min_size(egui::vec2(80.0, 30.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.show_text_input = false;
+                                    }
+                                });
                             });
                         });
+
+                    if !show {
+                        self.show_text_input = false;
+                    }
                 }
 
                 // Handle drawing end
@@ -357,4 +434,60 @@ impl AnnotationApp {
             }
         }
     }
+
+    fn shape_contains_point(shape: &Shape, point: Pos2, scale_factor: f32) -> bool {
+        let scaled_point = Pos2::new(point.x / scale_factor, point.y / scale_factor);
+
+        match shape {
+            Shape::Rectangle { rect, .. } => {
+                let scaled_rect = Rect::from_min_max(
+                    Pos2::new(rect.min.x / scale_factor, rect.min.y / scale_factor),
+                    Pos2::new(rect.max.x / scale_factor, rect.max.y / scale_factor),
+                );
+                // Add a small margin for easier selection
+                scaled_rect.expand(3.0).contains(scaled_point)
+            }
+            Shape::Circle { center, radius, .. } => {
+                let scaled_point = Pos2::new(point.x / scale_factor, point.y / scale_factor);
+                let scaled_center = Pos2::new(center.x / scale_factor, center.y / scale_factor);
+                scaled_point.distance(scaled_center) <= radius / scale_factor
+            }
+            Shape::Arrow { start, end, .. } => {
+                let scaled_point = Pos2::new(point.x / scale_factor, point.y / scale_factor);
+                let scaled_start = Pos2::new(start.x / scale_factor, start.y / scale_factor);
+                let scaled_end = Pos2::new(end.x / scale_factor, end.y / scale_factor);
+                let threshold = 5.0; // Distance threshold in pixels
+                point_to_line_segment_distance(scaled_point, scaled_start, scaled_end) < threshold
+            }
+            Shape::FreeHand { points, .. } => {
+                let scaled_point = Pos2::new(point.x / scale_factor, point.y / scale_factor);
+                points.windows(2).any(|window| {
+                    if let [p1, p2] = window {
+                        let scaled_p1 = Pos2::new(p1.x / scale_factor, p1.y / scale_factor);
+                        let scaled_p2 = Pos2::new(p2.x / scale_factor, p2.y / scale_factor);
+                        point_to_line_segment_distance(scaled_point, scaled_p1, scaled_p2) < 5.0
+                    } else {
+                        false
+                    }
+                })
+            }
+            Shape::Text { position, .. } => {
+                let scaled_point = Pos2::new(point.x / scale_factor, point.y / scale_factor);
+                let scaled_pos = Pos2::new(position.x / scale_factor, position.y / scale_factor);
+                let text_rect = Rect::from_min_size(scaled_pos, egui::vec2(100.0, 20.0));
+                text_rect.contains(scaled_point)
+            }
+        }
+    }
+}
+
+fn point_to_line_segment_distance(point: Pos2, start: Pos2, end: Pos2) -> f32 {
+    let line = end - start;
+    let len_sq = line.length_sq();
+    if len_sq == 0.0 {
+        return point.distance(start);
+    }
+    let t = ((point - start).dot(line) / len_sq).clamp(0.0, 1.0);
+    let projection = start + line * t;
+    point.distance(projection)
 }

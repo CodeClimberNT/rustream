@@ -41,7 +41,7 @@ impl Default for VideoConfig {
         Self {
             output_path: base_path.join("output.mkv"),
             // TODO: change to actual networking stream fps
-            fps: 60,
+            fps: 6,
             temp_dir: temp_path,
         }
     }

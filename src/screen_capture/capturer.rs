@@ -211,7 +211,7 @@ impl ScreenCapture {
                         },
                     }
                 }
-                thread::sleep(std::time::Duration::from_millis(1000 / config.lock().unwrap().video.fps as u64));
+                thread::sleep(std::time::Duration::from_millis(1000 / 6));
             }
         });
     }
