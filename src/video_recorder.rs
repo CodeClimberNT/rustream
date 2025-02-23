@@ -163,15 +163,14 @@ impl VideoRecorder {
             let video_config = config_guard.video.clone();
             drop(config_guard); // Release lock early
 
-            let fps = Self::calculate_fps(frame_counter, &video_config, start_time);
             info!(
                 "Recording metrics - Frames: {}, Duration: {:.2}s, Calculated FPS: {}",
                 frame_counter,
                 start_time.map_or(0.0, |t| t.elapsed().as_secs_f64()),
-                fps
+                video_config.fps
             );
 
-            VideoRecorder::run_ffmpeg_command(&video_config, &fps);
+            VideoRecorder::run_ffmpeg_command(&video_config);
             std::fs::remove_dir_all(&video_config.temp_dir)
                 .expect("Failed to clean temp directory");
             is_finalizing.store(false, Ordering::SeqCst);
@@ -180,10 +179,10 @@ impl VideoRecorder {
         true
     }
 
-    fn run_ffmpeg_command(video_config: &VideoConfig, fps: &u32) {
+    fn run_ffmpeg_command(video_config: &VideoConfig) {
         let output_path = Self::generate_unique_path(video_config.output_path.clone());
         info!("Generating video...");
-
+        let fps = video_config.fps;
         let mut command = Command::new("ffmpeg");
 
         // Platform-specific configuration to hide window
@@ -251,10 +250,6 @@ impl VideoRecorder {
 
     pub fn is_recording(&self) -> bool {
         self.is_recording.load(Ordering::SeqCst)
-    }
-
-    fn calculate_fps(frame_counter: u32, config: &VideoConfig, start_time: Option<Instant>) -> u32 {
-        return config.fps;
     }
 
     fn generate_unique_path(base_path: PathBuf) -> PathBuf {

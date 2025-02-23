@@ -1,23 +1,23 @@
 use crate::common::CaptureArea;
 use crate::config::Config;
+use crate::data_streaming::{start_receiving, start_streaming, Receiver, Sender, PORT};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::video_recorder::VideoRecorder;
-use crate::data_streaming::{Sender, Receiver, start_streaming, start_receiving, PORT};
-use tokio::sync::oneshot::{channel, error::TryRecvError};
-use tokio::sync::Notify;
-use std::net::{SocketAddr, IpAddr, Ipv4Addr};
-use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::oneshot::{channel, error::TryRecvError};
+use tokio::sync::Notify;
 // use std::time::Duration;
-
 
 use eframe::egui;
 use egui::{
-    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextStyle, TextureHandle, TopBottomPanel, Ui, Window
+    CentralPanel, Color32, ColorImage, ComboBox, Context, FontId, Rect, RichText, TextStyle,
+    TextureHandle, TopBottomPanel, Ui, Window,
 };
 
 use std::env;
@@ -26,21 +26,18 @@ use std::process::Command;
 use display_info::DisplayInfo;
 use log::{debug, error, info};
 
-
-
-
 pub struct RustreamApp {
     pub config: Arc<Mutex<Config>>,
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
     pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
     video_recorder: VideoRecorder,
-    page: PageView,                           // Enum to track modes
-    display_texture: Option<TextureHandle>,   // Texture for the screen capture
-    textures: HashMap<TextureId, TextureHandle>, // List of textures
+    page: PageView,                                       // Enum to track modes
+    display_texture: Option<TextureHandle>,               // Texture for the screen capture
+    textures: HashMap<TextureId, TextureHandle>,          // List of textures
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
-    address_text: String,  
-    caster_addr: Option<SocketAddr>,                   // Text input for the receiver mode
+    address_text: String,
+    caster_addr: Option<SocketAddr>, // Text input for the receiver mode
     streaming_active: bool,
     is_selecting: bool,
     cropped_frame: Option<CapturedFrame>,
@@ -63,7 +60,6 @@ pub struct RustreamApp {
     is_address_valid: bool,
     host_unreachable: Arc<AtomicBool>,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextureId {
@@ -111,7 +107,6 @@ pub enum PageView {
 }
 
 impl RustreamApp {
-
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx: &Context = &cc.egui_ctx;
         egui_extras::install_image_loaders(ctx);
@@ -138,7 +133,6 @@ impl RustreamApp {
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
         let video_recorder = VideoRecorder::new(config.clone());
-
 
         RustreamApp {
             config,
@@ -170,9 +164,9 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            cropped_frame: None, 
-            is_address_valid: true,  
-            host_unreachable: Arc::new(AtomicBool::new(false)),    
+            cropped_frame: None,
+            is_address_valid: true,
+            host_unreachable: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -233,20 +227,18 @@ impl RustreamApp {
 
                 ui.add_space(30.0);
                 if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("VIEW STREAMING").size(25.0).strong(),
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("VIEW STREAMING").size(25.0).strong(),
+                        )
+                        .min_size(egui::vec2(300.0, 50.0)),
                     )
-                    .min_size(egui::vec2(300.0, 50.0)),
-                )
-                .clicked()
+                    .clicked()
                 {
                     self.set_page(PageView::Receiver);
                 }
-                
-                ui.add_space(30.0);
 
-                
+                ui.add_space(30.0);
             });
         });
     }
@@ -266,64 +258,13 @@ impl RustreamApp {
             .show(ctx, |ui| {
                 let mut config = self.config.lock().unwrap().clone();
 
-                // Manual capture area input
-                ui.heading("Capture Area");
-                ui.horizontal(|ui| {
-                    let mut area = self.capture_area.unwrap_or_default();
-                    //println!("this is the global variable: {:?}", *area);
-
-                    ui.vertical(|ui| {
-                        ui.label("X:");
-                        let mut x_str = area.x.to_string();
-                        if ui.text_edit_singleline(&mut x_str).changed() {
-                            if let Ok(x) = x_str.parse() {
-                                area.x = x;
-                                self.capture_area = Some(area);
-                            }
-                        }
-
-                        ui.label("Y:");
-                        let mut y_str = area.y.to_string();
-                        if ui.text_edit_singleline(&mut y_str).changed() {
-                            if let Ok(y) = y_str.parse() {
-                                area.y = y;
-                                self.capture_area = Some(area);
-                            }
-                        }
-                    });
-
-                    ui.vertical(|ui| {
-                        ui.label("Width:");
-                        let mut width_str = area.width.to_string();
-                        if ui.text_edit_singleline(&mut width_str).changed() {
-                            if let Ok(width) = width_str.parse() {
-                                area.width = width;
-                                self.capture_area = Some(area);
-                            }
-                        }
-
-                        ui.label("Height:");
-                        let mut height_str = area.height.to_string();
-                        if ui.text_edit_singleline(&mut height_str).changed() {
-                            if let Ok(height) = height_str.parse() {
-                                area.height = height;
-                                self.capture_area = Some(area);
-                            }
-                        }
-                    });
-                });
-
-                // Update config when capture area changes
-                if let Some(area) = self.capture_area {
-                    config.capture.capture_area = Some(area);
-                }
-
-                ui.heading("Streaming Settings");
+                // Display Settings Section
+                ui.heading("Display Settings");
                 ui.separator();
-                
+
                 // Monitor selection
                 let selected_monitor = &mut config.capture.selected_monitor;
-                let current_monitor= *selected_monitor;
+                let current_monitor = *selected_monitor;
 
                 ComboBox::from_label("Monitor")
                     .selected_text(format!("Monitor {}", selected_monitor))
@@ -333,124 +274,69 @@ impl RustreamApp {
                             .iter()
                             .enumerate()
                             .for_each(|(i, m)| {
-                            if ui.selectable_value(selected_monitor, i, m).clicked() && current_monitor != self.previous_monitor {
+                                if ui.selectable_value(selected_monitor, i, m).clicked()
+                                    && current_monitor != self.previous_monitor
+                                {
                                     self.capture_area = None;
                                     self.previous_monitor = current_monitor;
-                            }
-            });
+                                }
+                            });
                     });
+
+                // Capture Area Section
+                ui.add_space(10.0);
+                ui.label(RichText::new(if self.capture_area.is_some() {
+                    "Selected Capture Area"
+                } else {
+                    "No Capture Area Selected - Use 'Select Capture Area' button to define region"
+                }).size(16.0));
 
                 ui.horizontal(|ui| {
                     self.is_selecting ^= ui.button("Select Capture Area").clicked();
-
-                    if self.is_selecting {
-                        //println!("{:?}", self.capture_area);
-                        //creating a transparent window with egui-overlay
-
-                        // Open a new full-size window for selecting capture area
-                        //check if the process with arg --secondary is opened yet
-                        //shows in console value of selected_monitor
-                        //info!("Selected Monitor: {}", selected_monitor);
-                        let displays = DisplayInfo::all().unwrap_or_default();
-                        //info!("Displays: {:?}", displays);
-                        let display = displays.get(*selected_monitor).unwrap_or_else(|| {
-                            error!("Monitor not found: {}", selected_monitor);
-                            std::process::exit(1);
-                        });
-                        //display name + x and y
-                        info!("Display: {} ({},{}) ({}x{}) | scale factor: {}", display.name, display.x, display.y, display.width, display.height, display.scale_factor);
-                        let output = Command::new(env::current_exe().unwrap())
-                        .arg("--overlay:selection")
-                        .arg(display.x.to_string())
-                        .arg(display.y.to_string())
-                        .arg(display.width.to_string())
-                        .arg(display.height.to_string())
-                        .arg(display.scale_factor.to_string())
-                        .output()
-                        .expect("failed to execute process");
-
-                            if output.status.success() {
-                                // Parse stdout with error handling
-                                let stdout = std::str::from_utf8(&output.stdout).unwrap_or_else(|e| {
-                                    error!("Failed to read stdout: {}", e);
-                                    ""
-                                });
-                                debug!("Main process received: {}", stdout);
-                            
-                                // Parse JSON with detailed error handling
-                                let json_response: serde_json::Value = serde_json::from_str(stdout).unwrap_or_else(|e| {
-                                    error!("Failed to parse JSON response: {}", e);
-                                    serde_json::json!({ "status": "error" })
-                                });
-                                
-                                match json_response["status"].as_str() {
-                                    Some("success") => {
-                                        if let Some(data) = json_response.get("data") {
-                                            // Detailed error handling for struct mismatch
-                                            let capture_area = serde_json::from_value(data.clone()).unwrap_or_else(|e| {
-                                                error!("Failed to parse capture area data: {}", e);
-                                                error!("Possible struct mismatch between SecondaryApp and main process");
-                                                error!("Expected format: {{x: usize, y: usize, width: usize, height: usize}}");
-                                                None
-                                            });
-                                            self.capture_area = capture_area;
-                                        }
-                                    }
-                                    Some("cancelled") => {
-                                        println!("User cancelled the capture operation");
-                                    }
-                                    _ => {
-                                        error!("Unknown status in response");
-                                    }
-                                }
-                            } else {
-                                // Handle process errors
-                                match std::str::from_utf8(&output.stderr) {
-                                    Ok(stderr) if !stderr.is_empty() => {
-                                        error!("Secondary process error: {}", stderr);
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to read stderr: {}", e);
-                                    }
-                                    _ => {
-                                        error!("Secondary process failed with no error output");
-                                    }
-                                }
-                            }
-
-                        self.is_selecting = false;
-                    }
-
-                    if self.capture_area.is_some() && ui.button("Reset Capture Area").clicked() {
-                        self.capture_area = None;
+                    if self.capture_area.is_some() {
+                        ui.add_space(10.0);
+                        if ui.button("Reset Capture Area").clicked() {
+                            self.capture_area = None;
+                        }
                     }
                 });
 
-                // Update capture area in config when it changes
                 if let Some(area) = self.capture_area {
-                    let mut config = self.config.lock().unwrap();
-                    config.capture.capture_area =
-                        Some(CaptureArea::new(area.x, area.y, area.width, area.height));
+                    egui::Grid::new("capture_area_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Position:");
+                            ui.label(format!("X: {} px, Y: {} px", area.x, area.y));
+                            ui.end_row();
+
+                            ui.label("Size:");
+                            ui.label(format!("{}x{} px", area.width, area.height));
+                            ui.end_row();
+                        });
                 }
 
-                // In render_config_window after the "Streaming Settings" section:
+                // Handle capture area selection process
+                if self.is_selecting {
+                    self.handle_capture_area_selection(selected_monitor);
+                    self.is_selecting = false;
+                }
+
+                // Hotkey Settings Section
+                ui.add_space(20.0);
                 ui.heading("Hotkey Settings");
                 ui.separator();
 
-                // Show current hotkeys in a table
-                ui.label("Current Hotkeys:");
                 egui::Grid::new("hotkeys_grid")
                     .num_columns(3)
                     .spacing([40.0, 4.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        // Header
                         ui.label("Action");
                         ui.label("Shortcut");
                         ui.label("Controls");
                         ui.end_row();
 
-                        // Display each hotkey
                         let actions: Vec<_> = self
                             .hotkey_manager
                             .default_shortcuts
@@ -459,18 +345,17 @@ impl RustreamApp {
                             .cloned()
                             .collect();
 
-                        actions.iter().for_each(|action| {
+                        for action in actions {
                             ui.label(action.to_string());
 
-                            // Find current combination and check if default
                             let (combo_text, is_default) = self
                                 .hotkey_manager
                                 .shortcuts
                                 .iter()
-                                .find(|(_, a)| *a == action)
+                                .find(|(_, a)| *a == &action)
                                 .map(|(k, _)| {
                                     let text = k.to_string();
-                                    let is_default = self.hotkey_manager.is_default(k, action);
+                                    let is_default = self.hotkey_manager.is_default(k, &action);
                                     (
                                         if is_default {
                                             RichText::new(text)
@@ -488,67 +373,124 @@ impl RustreamApp {
                                 if ui.button("🖊").clicked() {
                                     self.editing_hotkey = Some(action.clone());
                                 }
-                                ui.add_enabled(!is_default, egui::Button::new("↺"))
+                                if ui
+                                    .add_enabled(!is_default, egui::Button::new("↺"))
                                     .clicked()
-                                    .then(|| self.hotkey_manager.reset_action(action));
+                                {
+                                    self.hotkey_manager.reset_action(&action);
+                                }
                             });
                             ui.end_row();
-                        });
+                        }
                     });
 
-                if let Some(editing_action) = self.editing_hotkey.clone() {
-                    Window::new("Configure Hotkey")
-                        .collapsible(false)
-                        .resizable(false)
-                        .show(ctx, |ui| {
-                            ui.label(format!(
-                                "Press new key combination for {:?}",
-                                editing_action
-                            ));
-                            ui.label("Press Esc to cancel");
-
-                            // Capture key input
-                            let input = ui.input(|i| {
-                                (
-                                    i.modifiers.ctrl,
-                                    i.modifiers.shift,
-                                    i.modifiers.alt,
-                                    i.keys_down.iter().next().copied(),
-                                )
-                            });
-
-                            if let (ctrl, shift, alt, Some(key)) = input {
-                                if key == egui::Key::Escape {
-                                    self.editing_hotkey = None;
-                                } else {
-                                    let new_combination = KeyCombination {
-                                        ctrl,
-                                        shift,
-                                        alt,
-                                        key,
-                                    };
-                                    self.hotkey_manager
-                                        .register_shortcut(new_combination, editing_action);
-                                    self.editing_hotkey = None;
-                                }
-                            }
-                        });
-                }
-
-                // Reset button
                 if ui.button("Reset to Default Hotkeys").clicked() {
                     self.hotkey_manager.reset_to_defaults();
                 }
-   
-                // Apply changes if the config has changed
-                let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
-                if has_config_changed {
+
+                // Hotkey editing popup
+                if let Some(editing_action) = &self.editing_hotkey {
+                    self.show_hotkey_popup(ctx, editing_action.clone());
+                }
+
+                // Apply changes
+                if self.config.lock().unwrap().clone() != config {
                     debug!("Config changed: {:?}", config);
                     self.config.lock().unwrap().update(config);
                     self.frame_grabber.reset_capture();
                 }
             });
+
         self.show_config = show_config;
+    }
+
+    // Helper method to show hotkey popup
+    fn show_hotkey_popup(&mut self, ctx: &Context, editing_action: HotkeyAction) {
+        Window::new("Configure Hotkey")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Press new key combination for {:?}",
+                    editing_action
+                ));
+                ui.label("Press Esc to cancel");
+
+                let input = ui.input(|i| {
+                    (
+                        i.modifiers.ctrl,
+                        i.modifiers.shift,
+                        i.modifiers.alt,
+                        i.keys_down.iter().next().copied(),
+                    )
+                });
+
+                if let (ctrl, shift, alt, Some(key)) = input {
+                    if key == egui::Key::Escape {
+                        self.editing_hotkey = None;
+                    } else {
+                        let new_combination = KeyCombination {
+                            ctrl,
+                            shift,
+                            alt,
+                            key,
+                        };
+                        self.hotkey_manager
+                            .register_shortcut(new_combination, editing_action);
+                        self.editing_hotkey = None;
+                    }
+                }
+            });
+    }
+
+    // Helper method to handle capture area selection
+    fn handle_capture_area_selection(&mut self, selected_monitor: &usize) {
+        let displays = DisplayInfo::all().unwrap_or_default();
+        let display = match displays.get(*selected_monitor) {
+            Some(d) => d,
+            None => {
+                error!("Monitor not found: {}", selected_monitor);
+                return;
+            }
+        };
+
+        info!(
+            "Display: {} ({},{}) ({}x{}) | scale factor: {}",
+            display.name, display.x, display.y, display.width, display.height, display.scale_factor
+        );
+
+        let output = match Command::new(env::current_exe().unwrap())
+            .arg("--overlay:selection")
+            .arg(display.x.to_string())
+            .arg(display.y.to_string())
+            .arg(display.width.to_string())
+            .arg(display.height.to_string())
+            .arg(display.scale_factor.to_string())
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                error!("Failed to execute selection process: {}", e);
+                return;
+            }
+        };
+
+        if output.status.success() {
+            match std::str::from_utf8(&output.stdout)
+                .map_err(|e| error!("Failed to read stdout: {}", e))
+                .and_then(|stdout| {
+                    debug!("Main process received: {}", stdout);
+                    serde_json::from_str(stdout)
+                        .map_err(|e| error!("Failed to parse JSON response: {}", e))
+                }) {
+                Ok(json_response) => self.process_selection_response(json_response),
+                Err(_) => error!("Failed to process selection response"),
+            }
+        } else if let Ok(stderr) = std::str::from_utf8(&output.stderr) {
+            if !stderr.is_empty() {
+                error!("Secondary process error: {}", stderr);
+            }
+        }
     }
 
     fn render_recording_settings(&mut self, ctx: &Context) {
@@ -564,48 +506,53 @@ impl RustreamApp {
                     .inner_margin(10.0),
             )
             .show(ctx, |ui| {
-            let mut config = self.config.lock().unwrap().clone();
-        
-            ui.heading("Recording Settings");
-            ui.separator();
-        
-            // Output path configuration
-            ui.horizontal(|ui| {
-                ui.label("Output path:");
-                let mut recording_path = config.video.output_path.to_string_lossy().into_owned();
-                ui.text_edit_singleline(&mut recording_path)
-                    .on_hover_text(recording_path.clone());
-                if ui.button("📂").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_title("Save recording as...")
-                        .set_file_name("output.mkv")
-                        .add_filter("Matroska Video", &["mkv"])
-                        .save_file()
-                    {
-                        config.video.output_path = path;
+                let mut config = self.config.lock().unwrap().clone();
+
+                ui.heading("Recording Settings");
+                ui.separator();
+
+                // Output path configuration
+                ui.horizontal(|ui| {
+                    ui.label("Output path:");
+                    let mut recording_path =
+                        config.video.output_path.to_string_lossy().into_owned();
+                    ui.text_edit_singleline(&mut recording_path)
+                        .on_hover_text(recording_path.clone());
+                    if ui.button("📂").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Save recording as...")
+                            .set_file_name("output.mkv")
+                            .add_filter("Matroska Video", &["mkv"])
+                            .save_file()
+                        {
+                            config.video.output_path = path;
+                        }
                     }
+                });
+
+                // FPS settings
+                ui.horizontal(|ui| {
+                    ui.label("Target FPS:");
+                    ComboBox::from_label("")
+                        .selected_text(format!("{} FPS", config.video.fps))
+                        .show_ui(ui, |ui| {
+                            for &fps in &[6, 24, 25, 30, 50, 60] {
+                                ui.selectable_value(
+                                    &mut config.video.fps,
+                                    fps,
+                                    format!("{} FPS", fps),
+                                );
+                            }
+                        });
+                });
+
+                // Apply changes if the config has changed
+                let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
+                if has_config_changed {
+                    self.config.lock().unwrap().update(config);
+                    self.frame_grabber.reset_capture();
                 }
             });
-        
-            // FPS settings
-            ui.horizontal(|ui| {
-                ui.label("Target FPS:");
-                ComboBox::from_label("")
-                    .selected_text(format!("{} FPS", config.video.fps))
-                    .show_ui(ui, |ui| {
-                        for &fps in &[6, 24, 25, 30, 50, 60] {
-                            ui.selectable_value(&mut config.video.fps, fps, format!("{} FPS", fps));
-                        }
-                    });
-            });
-        
-            // Apply changes if the config has changed
-            let has_config_changed: bool = self.config.lock().unwrap().clone() != config;
-            if has_config_changed {
-                self.config.lock().unwrap().update(config);
-                self.frame_grabber.reset_capture();
-            }
-        });
 
         self.show_config = show_config;
     }
@@ -635,13 +582,12 @@ impl RustreamApp {
                 self.start_recording();
             }
         }
-        
     }
     fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         ui.heading("Monitor Feedback");
         ui.separator();
         ui.vertical_centered(|ui| {
-        //TODO: add toggle preview to save resources 
+            //TODO: add toggle preview to save resources
             ui.horizontal(|ui| {
                 if self.action_button(
                     ui,
@@ -650,13 +596,13 @@ impl RustreamApp {
                     } else {
                         "Start Streaming"
                     },
-                    HotkeyAction::ToggleStreaming, 
+                    HotkeyAction::ToggleStreaming,
                 ) {
                     self.streaming_active = !self.streaming_active;
                 }
-                
+
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
-                   let selected_monitor =  self.config.lock().unwrap().capture.selected_monitor;
+                    let selected_monitor = self.config.lock().unwrap().capture.selected_monitor;
                     let displays = DisplayInfo::all().unwrap_or_default();
                     //info!("Displays: {:?}", displays);
                     let display = displays.get(selected_monitor).unwrap_or_else(|| {
@@ -666,21 +612,19 @@ impl RustreamApp {
 
                     #[allow(unused_must_use)]
                     Command::new(env::current_exe().unwrap())
-                    .arg("--overlay:annotation")
-                    .arg(display.x.to_string())
-                    .arg(display.y.to_string())
-                    .arg(display.width.to_string())
-                    .arg(display.height.to_string())
-                    .arg(display.scale_factor.to_string())
-                    .spawn();
+                        .arg("--overlay:annotation")
+                        .arg(display.x.to_string())
+                        .arg(display.y.to_string())
+                        .arg(display.width.to_string())
+                        .arg(display.height.to_string())
+                        .arg(display.scale_factor.to_string())
+                        .spawn();
                 }
 
                 if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
                     self.show_config = true;
                 }
                 ui.add_space(50.0);
-
-                
             });
         });
 
@@ -688,54 +632,55 @@ impl RustreamApp {
         self.render_config_window(ctx);
 
         ui.vertical_centered(|ui| {
-            
             let cap_frames = self.captured_frames.clone();
-            
-            if !self.started_capture { //call capture_frame only once
+
+            if !self.started_capture {
+                //call capture_frame only once
                 self.started_capture = true;
                 //FIXME: capture area need to be sent across thread
                 self.frame_grabber.capture_frame(cap_frames);
             }
-            
+
             let mut frames = self.captured_frames.lock().unwrap();
-            if let Some(display_frame) = frames.pop_front() { //front().cloned()
+            if let Some(display_frame) = frames.pop_front() {
+                //front().cloned()
                 if frames.len() >= 7 {
                     println!("Captured_Frames len: {}, dropping frames", frames.len());
                     frames.clear() //truncate(3); //only leave 3 elements
                 }
-                
+
                 drop(frames);
-       
-                if self.streaming_active {                    
-                    
+
+                if self.streaming_active {
                     // Initialize sender if it doesn't exist
                     if self.sender.is_none() && !self.socket_created {
-                        let  (tx, rx) = channel();
+                        let (tx, rx) = channel();
                         self.socket_created = true;
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
                             let _ = tx.send(Arc::new(tokio::sync::Mutex::new(sender)));
                         });
-                        
+
                         //store rx to poll it later to see if initialization completed, since the channel sender is async
-                        self.sender_rx = Some(rx);   
+                        self.sender_rx = Some(rx);
                     }
 
                     // Check if we have a pending sender initialization
-                    if let Some(mut rx) = self.sender_rx.take() {  //take consumes the sender_rx
+                    if let Some(mut rx) = self.sender_rx.take() {
+                        //take consumes the sender_rx
                         // Try to receive the sender
                         if let Ok(sender) = rx.try_recv() {
                             self.sender = Some(sender);
-                        }
-                        else {
+                        } else {
                             // Put the receiver back if we haven't received yet
                             self.sender_rx = Some(rx);
                         }
-                    } 
+                    }
 
                     // Send frame if we have a sender
-                    if let Some(sender) = &self.sender { //i redo the check to extract the sender from Option<Sender>
+                    if let Some(sender) = &self.sender {
+                        //i redo the check to extract the sender from Option<Sender>
                         let sender_clone = sender.clone();
                         //let mut frames = self.captured_frames.lock().unwrap();
 
@@ -750,10 +695,16 @@ impl RustreamApp {
 
                         // Store the cropped frame if a capture area is selected
                         if let Some(area) = self.capture_area {
-                            self.cropped_frame = display_frame.clone().view(area.x as u32, area.y as u32, area.width as u32, area.height as u32);
+                            self.cropped_frame = display_frame.clone().view(
+                                area.x as u32,
+                                area.y as u32,
+                                area.width as u32,
+                                area.height as u32,
+                            );
                         }
                         // Send a cropped frame if we have one, otherwise send the full frame
-                        let clone_frame = self.cropped_frame.clone().unwrap_or(display_frame.clone());
+                        let clone_frame =
+                            self.cropped_frame.clone().unwrap_or(display_frame.clone());
                         tokio::spawn(async move {
                             if let Err(e) = start_streaming(sender_clone, clone_frame).await {
                                 eprintln!("Error sending frame: {}", e);
@@ -765,13 +716,14 @@ impl RustreamApp {
                 // Convert to ColorImage for display
                 let image: ColorImage = if let Some(area) = self.capture_area {
                     // Apply cropping if we have a capture area
-                    if let Some(cropped) =
-                        display_frame
-                            .clone()
-                            .view(area.x as u32, area.y as u32, area.width as u32, area.height as u32)
-                    {
+                    if let Some(cropped) = display_frame.clone().view(
+                        area.x as u32,
+                        area.y as u32,
+                        area.width as u32,
+                        area.height as u32,
+                    ) {
                         egui::ColorImage::from_rgba_unmultiplied(
-                            [cropped.width, cropped.height ],
+                            [cropped.width, cropped.height],
                             &cropped.rgba_data, // Changed from frame_data to rgba_data
                         )
                     } else {
@@ -784,7 +736,7 @@ impl RustreamApp {
                 } else {
                     // No crop area selected, show full image
                     egui::ColorImage::from_rgba_unmultiplied(
-                        [display_frame.width, display_frame.height ],
+                        [display_frame.width, display_frame.height],
                         &display_frame.rgba_data, // Changed from frame_data to rgba_data
                     )
                 };
@@ -814,52 +766,53 @@ impl RustreamApp {
         });
     }
 
-    pub fn receiver_page(&mut self, ctx: &Context, ui: &mut Ui) {
-
-        self.show_fps_counter(ctx, ui);
+    pub fn receiver_page(&mut self, ctx: &Context, _ui: &mut Ui) {
+        self.show_fps_counter(ctx);
         // Render the recording settings window if it's open
         self.render_recording_settings(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Receiver Mode");
-            ui.vertical_centered(|ui| { 
-
+            ui.vertical_centered(|ui| {
                 if !self.is_receiving {
                     ui.label(RichText::new("Enter the Sender's IP Address").size(15.0));
                     ui.add_space(10.0);
 
                     let connect_button = egui::Button::new(
-                    egui::RichText::new("Connect").color(egui::Color32::WHITE).size(15.0))
+                        egui::RichText::new("Connect")
+                            .color(egui::Color32::WHITE)
+                            .size(15.0),
+                    )
                     .fill(egui::Color32::from_rgb(0, 200, 0))
                     .min_size(egui::vec2(60.0, 30.0));
-            
+
                     ui.style_mut().text_styles.insert(
                         TextStyle::Body,
                         FontId::new(15.0, egui::FontFamily::Proportional),
                     );
                     ui.add_sized(
                         egui::vec2(300.0, 30.0), // Width: 300, Height: 30
-                        egui::TextEdit::singleline(&mut self.address_text)
-                        .frame(true)
+                        egui::TextEdit::singleline(&mut self.address_text).frame(true),
                     );
                     ui.add_space(20.0);
-                            
-                            
-                    //if connect button is clicked
-                    if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button).clicked(){
 
+                    //if connect button is clicked
+                    if ui
+                        .add_enabled(!self.address_text.trim().is_empty(), connect_button)
+                        .clicked()
+                    {
                         //check if inserted address is valid
                         if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
                             self.is_address_valid = true;
                             let caster_addr = SocketAddr::new(IpAddr::V4(addr), PORT);
-                            self.caster_addr = Some(caster_addr); 
+                            self.caster_addr = Some(caster_addr);
 
                             //clear the previous frame queue to prevent frames from previous streaming from being displayed
                             let mut frames = self.received_frames.lock().unwrap();
-                            frames.clear();  
+                            frames.clear();
                             drop(frames);
-                    
-                            let  (tx, rx) = channel();
+
+                            let (tx, rx) = channel();
 
                             // Initialize receiver
                             tokio::spawn(async move {
@@ -868,30 +821,34 @@ impl RustreamApp {
                             });
 
                             //store rx to poll it later to see if initialization completed, since the channel sender is async
-                            self.receiver_rx = Some(rx); 
+                            self.receiver_rx = Some(rx);
                             self.is_receiving = true;
-
                         } else {
                             self.is_address_valid = false;
-                        }    
+                        }
                     }
                     //show Invalid IP Address message if the address is not valid
                     if !self.is_address_valid {
                         ui.add_space(20.0);
-                        ui.label(RichText::new("Invalid IP Address").color(Color32::RED).size(15.0));
-                        
+                        ui.label(
+                            RichText::new("Invalid IP Address")
+                                .color(Color32::RED)
+                                .size(15.0),
+                        );
                     }
-
-                } else { //receiving already started
+                } else {
+                    //receiving already started
                     // Show Stop, Start Recording and Recording Settings buttons
                     ui.horizontal(|ui| {
                         ui.vertical_centered(|ui| {
                             let stop_button = egui::Button::new(
-                                egui::RichText::new("Stop").color(egui::Color32::WHITE).size(15.0)
+                                egui::RichText::new("Stop")
+                                    .color(egui::Color32::WHITE)
+                                    .size(15.0),
                             )
                             .fill(egui::Color32::from_rgb(200, 0, 0))
                             .min_size(egui::vec2(60.0, 30.0));
-                    
+
                             if ui.add(stop_button).clicked() {
                                 self.stop_notify.notify_waiters();
                                 self.host_unreachable.store(false, Ordering::SeqCst);
@@ -905,85 +862,100 @@ impl RustreamApp {
                                 self.frame_times.clear();
                                 self.current_fps = 0.0;
                             }
-                            
                         });
-                    
+
                         // Push "Start Recording" to the right
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(10.0);
                             self.render_recording_controls(ui);
 
                             ui.add_space(5.0);
-                            if self.action_button(ui, "⚙ Recording Settings", HotkeyAction::ClosePopup) {
+                            if self.action_button(
+                                ui,
+                                "⚙ Recording Settings",
+                                HotkeyAction::ClosePopup,
+                            ) {
                                 self.show_config = true;
                             }
                         });
-                        
                     });
                 }
 
                 // Show Host Unreachable message if the host is unreachable
                 if self.host_unreachable.load(Ordering::SeqCst) {
                     ui.add_space(20.0);
-                    ui.label(RichText::new("Host Unreachable").color(Color32::RED).size(15.0));
+                    ui.label(
+                        RichText::new("Host Unreachable")
+                            .color(Color32::RED)
+                            .size(15.0),
+                    );
                 }
-    
+
                 // Check if we have a pending receiver initialization
-                if let Some(mut rx) = self.receiver_rx.take() {  //take consumes the receiver_rx
-                    
+                if let Some(mut rx) = self.receiver_rx.take() {
+                    //take consumes the receiver_rx
+
                     // Try to receive the receiver
                     match rx.try_recv() {
                         Ok(receiver) => {
                             println!("Receiver initialized successfully");
                             self.receiver = Some(Arc::new(tokio::sync::Mutex::new(receiver)));
-                            
                         }
                         Err(TryRecvError::Empty) => {
                             // Put the channel receiver back if we haven't received yet
                             self.receiver_rx = Some(rx);
                         }
                         Err(TryRecvError::Closed) => {
-                            ui.label(RichText::new("Failed to receive receiver from channel").color(Color32::RED));
+                            ui.label(
+                                RichText::new("Failed to receive receiver from channel")
+                                    .color(Color32::RED),
+                            );
                             self.receiver_rx = None;
                         }
                     }
                 }
 
                 // Start/continue receiving if we have a receiver
-                if let Some(receiver) = &mut self.receiver { //i redo the check to extract the sender from Option<Sender>
-                    
-                    let receiver_clone = receiver.clone();           
-                    let rcv_frames = self.received_frames.clone();                   
+                if let Some(receiver) = &mut self.receiver {
+                    //i redo the check to extract the sender from Option<Sender>
+
+                    let receiver_clone = receiver.clone();
+                    let rcv_frames = self.received_frames.clone();
                     let stop_notify = self.stop_notify.clone();
                     let host_unreachable = self.host_unreachable.clone();
-                
+
                     tokio::spawn(async move {
-                        
                         let receiver = receiver_clone.lock().await;
-                        
-                        //start receiving only if it's the first time 
-                        if !receiver.started_receiving {                                 
+
+                        //start receiving only if it's the first time
+                        if !receiver.started_receiving {
                             drop(receiver); //drop the lock before starting the receiving task
-                            start_receiving(rcv_frames, receiver_clone, stop_notify, host_unreachable).await;                                
+                            start_receiving(
+                                rcv_frames,
+                                receiver_clone,
+                                stop_notify,
+                                host_unreachable,
+                            )
+                            .await;
                         }
-                    }); 
+                    });
 
                     // Retrieve the latest frame from the queue
-                    let frame = { //in this way the lock is released immediately
-                        let mut frames = self.received_frames.lock().unwrap();                                     
+                    let frame = {
+                        //in this way the lock is released immediately
+                        let mut frames = self.received_frames.lock().unwrap();
                         frames.pop_front()
                     };
-                    
-                    if let Some(frame) = frame {                    
 
+                    if let Some(frame) = frame {
                         if self.video_recorder.is_recording() {
                             self.video_recorder.record_frame(&frame);
                         }
 
                         // Convert to ColorImage for display
                         let image = egui::ColorImage::from_rgba_unmultiplied(
-                            [frame.width, frame.height], 
-                            &frame.rgba_data
+                            [frame.width, frame.height],
+                            &frame.rgba_data,
                         );
 
                         // Update texture in memory
@@ -1001,16 +973,17 @@ impl RustreamApp {
 
                         // Update FPS counter
                         self.update_fps_counter();
-                            
                     } else {
                         // Add a loading indicator while waiting for receiver initialization
-                        if self.display_texture.is_none() && !self.host_unreachable.load(Ordering::SeqCst){
+                        if self.display_texture.is_none()
+                            && !self.host_unreachable.load(Ordering::SeqCst)
+                        {
                             ui.add_space(40.0);
                             ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
                             ui.label(RichText::new("Connecting to sender...").size(15.0));
                         }
-                    }  
-                    ctx.request_repaint();                                                        
+                    }
+                    ctx.request_repaint();
                 }
                 // Update texture in UI
                 let texture = self
@@ -1018,26 +991,26 @@ impl RustreamApp {
                     .as_ref()
                     .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
                 ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
-                            
             });
         });
     }
 
-    fn update_fps_counter(&mut self){
+    fn update_fps_counter(&mut self) {
         let now = std::time::Instant::now();
         if let Some(last_frame_time) = self.last_frame_time {
             let frame_time = now.duration_since(last_frame_time);
             self.frame_times.push_back(frame_time);
-            
+
             // Keep only last 60 frame times for moving average
             if self.frame_times.len() > 60 {
                 self.frame_times.pop_front();
             }
-            
+
             // Calculate average FPS
             if !self.frame_times.is_empty() {
-                let avg_frame_time: std::time::Duration = self.frame_times.iter().sum::<std::time::Duration>() 
-                    / self.frame_times.len() as u32;
+                let avg_frame_time: std::time::Duration =
+                    self.frame_times.iter().sum::<std::time::Duration>()
+                        / self.frame_times.len() as u32;
                 self.current_fps = 1.0 / avg_frame_time.as_secs_f32();
             }
         }
@@ -1053,8 +1026,6 @@ impl RustreamApp {
         self.video_recorder.stop();
     }
 
-
-
     fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {
         // Get hotkey text if exists
         let hotkey_text = format!(
@@ -1063,7 +1034,7 @@ impl RustreamApp {
                 .get_shortcut_text(&action)
                 .unwrap_or_default()
         );
-    
+
         // Calculate size with padding for the label only
         let galley = ui.painter().layout_no_wrap(
             label.to_string(),
@@ -1075,14 +1046,14 @@ impl RustreamApp {
             galley.size().x + padding.x * 2.0,
             galley.size().y + padding.y * 2.0,
         );
-        
-    
+
         // Create button with fixed minimum size and hover text
-        let response = ui.add_sized(
-            min_size,
-            egui::Button::new(egui::RichText::new(label.to_string()).size(15.0))
-        ).on_hover_text(format!("{}{}", label, hotkey_text));
-    
+        let response = ui
+            .add_sized(
+                min_size,
+                egui::Button::new(egui::RichText::new(label.to_string()).size(15.0)),
+            )
+            .on_hover_text(format!("{}{}", label, hotkey_text));
 
         response.clicked() || self.triggered_actions.contains(&action)
     }
@@ -1119,16 +1090,44 @@ impl RustreamApp {
         response.clicked() || self.triggered_actions.contains(&action)
     }
 
-    fn show_fps_counter(&self, ctx: &Context, ui: &mut egui::Ui) {
+    fn show_fps_counter(&self, ctx: &Context) {
         egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.current_fps > 0.0 {
-                        ui.colored_label(egui::Color32::GREEN, format!("FPS: {:.1}", self.current_fps));
+                        ui.colored_label(
+                            egui::Color32::GREEN,
+                            format!("FPS: {:.1}", self.current_fps),
+                        );
                     }
                 });
             });
         });
+    }
+
+    fn process_selection_response(&mut self, json_response: serde_json::Value) {
+        match json_response["status"].as_str() {
+            Some("success") => {
+                if let Some(data) = json_response.get("data") {
+                    // Parse capture area data with detailed error handling
+                    let capture_area = serde_json::from_value(data.clone()).unwrap_or_else(|e| {
+                        error!("Failed to parse capture area data: {}", e);
+                        error!("Possible struct mismatch between SecondaryApp and main process");
+                        error!(
+                            "Expected format: {{x: usize, y: usize, width: usize, height: usize}}"
+                        );
+                        None
+                    });
+                    self.capture_area = capture_area;
+                }
+            }
+            Some("cancelled") => {
+                debug!("User cancelled the capture operation");
+            }
+            _ => {
+                error!("Unknown status in response");
+            }
+        }
     }
 
     /// Add a texture to the texture map

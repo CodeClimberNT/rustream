@@ -4,7 +4,7 @@
 use std::env;
 mod annotation;
 mod app;
-mod area_capture;
+mod area_selection;
 mod common;
 mod config;
 mod data_streaming;
@@ -13,7 +13,7 @@ mod screen_capture;
 mod video_recorder;
 
 use app::RustreamApp;
-use area_capture::AreaCaptureApp;
+use area_selection::AreaCaptureApp;
 use egui::{Pos2, Vec2, ViewportBuilder, X11WindowType};
 
 use env_logger::Env;

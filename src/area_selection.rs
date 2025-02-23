@@ -1,5 +1,5 @@
 use crate::common::CaptureArea;
-use eframe::egui::{self, CentralPanel, Color32, Pos2, Rect};
+use eframe::egui::{self, CentralPanel, Color32, Pos2, Rect, RichText}; // Add RichText import
 use egui::StrokeKind;
 use serde_json::json;
 use std::io::Write;
@@ -52,6 +52,10 @@ impl eframe::App for AreaCaptureApp {
         CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
+                if self.show_popup {
+                    ui.disable();
+                }
+
                 let response =
                     ui.allocate_rect(ui.available_rect_before_wrap(), egui::Sense::drag());
 
@@ -121,7 +125,16 @@ impl eframe::App for AreaCaptureApp {
                                         if ui
                                             .add_sized(
                                                 [button_width, 40.0],
-                                                egui::Button::new("OK"),
+                                                egui::Button::new(
+                                                    RichText::new("OK")
+                                                        .color(Color32::WHITE)
+                                                        .size(16.0),
+                                                )
+                                                .fill(Color32::from_rgb(0, 180, 0))
+                                                .stroke(egui::Stroke::new(
+                                                    1.0,
+                                                    Color32::from_rgb(0, 140, 0),
+                                                )),
                                             )
                                             .clicked()
                                         {
@@ -151,7 +164,16 @@ impl eframe::App for AreaCaptureApp {
                                         if ui
                                             .add_sized(
                                                 [button_width, 40.0],
-                                                egui::Button::new("Cancel"),
+                                                egui::Button::new(
+                                                    RichText::new("Cancel")
+                                                        .color(Color32::WHITE)
+                                                        .size(16.0),
+                                                )
+                                                .fill(Color32::from_rgb(180, 0, 0))
+                                                .stroke(egui::Stroke::new(
+                                                    1.0,
+                                                    Color32::from_rgb(140, 0, 0),
+                                                )),
                                             )
                                             .clicked()
                                         {

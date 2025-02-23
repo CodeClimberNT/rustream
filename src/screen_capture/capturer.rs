@@ -162,8 +162,7 @@ impl ScreenCapture {
                             current_dimensions = (width, height);
                         }
                         Err(e) => {
-                            error!("Failed to initialize Capturer: {:?}", e);
-                            thread::sleep(std::time::Duration::from_millis(100));
+                            error!("{}", CaptureError::InitError(e.to_string()));
                             return;
                         }
                     };
@@ -173,7 +172,6 @@ impl ScreenCapture {
                 if let Some(ref mut cap) = capturer {
                     match cap.frame() {
                         Ok(raw_frame) => {
-
                             let img_buffer: RgbaImage = ImageBuffer::from_raw(
                                 current_dimensions.0,
                                 current_dimensions.1,
@@ -187,8 +185,8 @@ impl ScreenCapture {
                                 img_buffer,
                             );
 
-                            let mut frames = captured_frames.lock().unwrap();                       
-                            
+                            let mut frames = captured_frames.lock().unwrap();
+
                             frames.push_back(rgba_img);
                         }
 

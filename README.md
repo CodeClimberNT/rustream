@@ -8,7 +8,7 @@ PDS project of an application written in rust to host and watch a streaming in r
 Using the Rust programming language, create a screencasting application capable of continuously
 grabbing the content of the screen (or a portion of it) and stream it to a set of peers.<br><br>
 The application should fulfill the following requirements:
-1. [ ] Platform Support: The utility should be compatible with multiple desktop operating systems,
+1. [x] Platform Support: The utility should be compatible with multiple desktop operating systems,
 including Windows, macOS, and Linux.
 2. [x] User Interface (UI): The utility should have an intuitive and user-friendly interface that allows
 users to easily navigate through the application's features.
@@ -23,7 +23,7 @@ pausing/resuming the transmission, for blanking the screen and terminating the c
 
 ### As a bonus, the application may also provide the following features:
 
-6. [ ] Annotation Tools: When in casting mode, the utility can activate/deactivate a transparent
+6. [x] Annotation Tools: When in casting mode, the utility can activate/deactivate a transparent
 layer on top of the grabbed area where annotations like shapes, arrows, text, …, can be
 superimposed to the original content.
 7. [x] Save Options: When in receiving mode, the utility should allow users to record the received
