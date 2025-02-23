@@ -310,15 +310,7 @@ impl Receiver {
                                     let encoded_frame = frame.clone();
                                     if let Err(e) = tx.send(encoded_frame).await {
                                         eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
-                                    }
-                                    //println!("Frame sent to process_frame");
-
-
-                                    //let frames = frames_vec.clone();
-                                    /*tokio::spawn(async move{
-                                        process_frame(enc_frames, frames).await;
-                                    });*/
-                                    //return Ok(frame);
+                                    }                                   
                                 }
 
                                 // Clear frame_chunks and received_chunks for the next frame
@@ -363,14 +355,8 @@ impl Drop for Receiver {
     }
 }
 
-async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {
-    // mut rx: mpsc::Receiver<Vec<u8>>
-
-    // while let Some(frame) = rx.recv().await { //while self.started_receiving
-    //let mut frames = enc_frames.lock().await;
-    //if let Some(frame) = frames.pop_front() {
-    //println!("Frame received in process_frame");
-    //drop(frames);
+async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {  // mut rx: mpsc::Receiver<Vec<u8>>       
+   
     let start = Instant::now();
     let decoded_frame = decode_from_h265_to_rgba(frame);
     let decode_time = start.elapsed();
@@ -380,36 +366,11 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
             let mut frames = frames_vec.lock().unwrap();
             frames.push_back(frame);
             //println!("Frame pushed to frames_vec");
-        }
-        Err(e) => {
-            eprintln!("Error decoding frame: {}", e);
-        }
-    };
-
-    //tokio::time::sleep(Duration::from_millis(5)).await;
-    //}
-    //}
-    /*let decoded_frame = decode_from_h265_to_rgba(frame);
-    //return decoded_frame;
-    match decoded_frame {
-        Ok(frame) => {
-            println!("Frame received in process_frame");
-            let mut frames = frames_vec.lock().unwrap();
-            frames.push_back(frame);
-            println!("Frame pushed to frames_vec");
-
-            /*if tx.is_closed() {
-                eprintln!("❌ Error: Channel is closed, cannot send frame");
-                return;
-            }
-            if let Err(e) = tx.send(frame).await {
-                eprintln!("❌ Error sending decoded frame to start_receiving: {}", e);
-            } */
         },
         Err(e) =>  {
             eprintln!("Error decoding frame: {}", e);
         }
-     };*/
+    };
 }
 
 pub async fn start_receiving(
@@ -419,126 +380,41 @@ pub async fn start_receiving(
     host_unreachable: Arc<AtomicBool>,
 ) {
     //println!("Inside start_receiving");
-
-    let mut recv = receiver.lock().await;
-    let stop_notify1 = stop_notify.clone();
-    //println!("Receiver lock acquired");
-
-    //if receiver changed caster address
-    /*if !connected {
-        println!("Connecting to the new sender");
-        if let Err(e) = recv.connect_to_sender().await{
-            println!("Error connecting to sender: {}", e);
-
-        };
-    }*/
-
-    /*if channel_rx.is_none() { //if rx has not been initialized before
-        let (tx, mut rx) = mpsc::channel::<CapturedFrame>(100);
-        let tx_clone = tx.clone();
-        recv.frame_rx = Some(rx);
-        recv.frame_tx = Some(tx);
-        //channel_rx = Some(rx);
-        drop(recv); //release the lock
-    }
-
-    let recv_clone = receiver.clone();
-    //wait to receive the decoded frame
-    let handle = tokio::spawn(async move {
-        println!("Waiting for processed frame");
-        let mut recv = recv_clone.lock().await;
-        if let Some(ref mut rx) = recv.frame_rx {
-             println!("Receiver lock acquired, waiting for processed frame");
-            if let Some(frame) = rx.recv().await { //release the lock
-                println!("Received processed frame");
-                drop(recv);
-                Some(frame)
-            } else {
-                println!("Error receiving frame from processing (channel closed)");
-                drop(recv);
-                None
-            }
-
-        } else {
-            drop(recv);
-            println!("No rx");
-            None
+ 
+    let stop_notify1 = stop_notify.clone();    
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
+        
+    tokio::spawn(async move {        
+        let mut recv = receiver.lock().await;        
+        println!("Calling recv_data");
+        
+        if let Err(_) = recv.recv_data(tx, stop_notify1).await{
+            //println!("Error receiving frame: {}", e);
+            host_unreachable.store(true, Ordering::SeqCst);
         }
-
-    });*/
-
-    //let recv_clone = receiver.clone();
-    if !recv.started_receiving {
-        recv.started_receiving = true;
-        drop(recv);
-
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
-
-        let recv_clone = receiver.clone();
-        tokio::spawn(async move {
-            //scope to release the lock
-            let mut recv = recv_clone.lock().await;
-
-            //let mut ready = false;
-            //let rc = receiver.clone();
-
-            //launch recv_data thread only when starting receiving a stream (vedere come implementare la cosa, i thread danno problemi per async)
-            //if !recv.started_receiving {
-            //recv.started_receiving = true;
-            //println!("inside is !started receiving");
-
-            //drop(recv); //release the lock
-
-            //tokio::spawn(async move { //let handle =
-            //println!("inside tokio spawn");
-            //let mut recv = rc.lock().await;
-
-            println!("Calling recv_data");
-            //if let Some(tx) = recv.frame_tx.clone() {
-            if let Err(e) = recv.recv_data(tx, stop_notify1).await {
-                //println!("Error receiving frame: {}", e);
-                host_unreachable.store(true, Ordering::SeqCst);
+        drop(recv);           
+    });
+        
+    //while let Some(frame) = rx.recv().await {
+    loop {
+        let frames_vec1 = frames_vec.clone();
+        tokio::select! {
+            _ = stop_notify.notified() => {
+                println!("Received stop signal, exiting start_receiving"); 
+                break; // Gracefully exit when `notify_waiters()` is called
             }
-            //if recv_data never ends recv is never dropped?
-            drop(recv);
 
-            /*match recv.recv_data().await{ //recv data deve diventare un thread?
-                Ok(frame) => {
-                    //println!("Frame received from recv_data");
-                    return Some(frame);
-                },
-                Err(e) => {
-                    println!("Error receiving frame: {}", e);
-                    return None;
-                }
-            }*/
-            //});
-            //}
-            //}
-        });
-
-        //while let Some(frame) = rx.recv().await {
-        loop {
-            let frames_vec1 = frames_vec.clone();
-            tokio::select! {
-                _ = stop_notify.notified() => {
-                    println!("Received stop signal, exiting start_receiving");
-                    break; // Gracefully exit when `notify_waiters()` is called
-                }
-
-                Some(frame) = rx.recv() => {
-
-                    tokio::spawn(async move {
-
-                        //println!("Calling process_frame");
-                        process_frame(frames_vec1, frame).await;
-                        // frames_vec is the vector of frames to share with ui
-
-                    });
-                }
+            Some(frame) = rx.recv() => {
+                
+                tokio::spawn(async move {
+                    //println!("Calling process_frame");
+                    process_frame(frames_vec1, frame).await;
+                    // frames_vec is the vector of frames to share with ui                    
+                }); 
             }
-        }
+        }  
     }
+    
 }
 
 fn decode_from_h265_to_rgba(
