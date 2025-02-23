@@ -28,7 +28,7 @@ use log::{debug, error, info};
 
 pub struct RustreamApp {
     pub config: Arc<Mutex<Config>>,
-    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>,
+    pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of frames recived by receiver
     pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
     video_recorder: VideoRecorder,
@@ -36,13 +36,13 @@ pub struct RustreamApp {
     display_texture: Option<TextureHandle>,               // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>,          // List of textures
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
-    address_text: String,
-    caster_addr: Option<SocketAddr>, // Text input for the receiver mode
+    address_text: String,              // Text input for the receiver mode
+    caster_addr: Option<SocketAddr>,   // Socket Address defined by user in receiver mode
     streaming_active: bool,
     is_selecting: bool,
     cropped_frame: Option<CapturedFrame>,
     capture_area: Option<CaptureArea>,
-    show_config: bool, // Add this field
+    show_config: bool, // Show config window
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
     receiver: Option<Arc<tokio::sync::Mutex<Receiver>>>,
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<tokio::sync::Mutex<Sender>>>>,
@@ -98,7 +98,7 @@ const TEXTURE_LIST: &[TextureResource] = &[
 
 const NUM_TEXTURES: usize = TEXTURE_LIST.len();
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub enum PageView {
     #[default]
     HomePage,
@@ -177,15 +177,31 @@ impl RustreamApp {
     }
 
     fn reset_ui(&mut self) {
-        // Reset the application when rertuning to the home page
-        self.frame_grabber.reset_capture();
+ 
+        // Reset the application when retuning to the home page
+        if self.page == PageView::Caster { //if we are exiting from caster mode
+            
+            self.frame_grabber.reset_capture();
+            self.sender = None;
+            self.sender_rx = None;
+            self.socket_created = false;
+            self.streaming_active = false;
+            self.started_capture = false;            
+            let mut frames = self.captured_frames.lock().unwrap();
+            frames.clear(); 
+            drop(frames);
+            self.cropped_frame = None;
+            self.display_texture = None;
+            self.capture_area = None;
+            
+        }        
+        
+        else if self.page == PageView::Receiver { //if we are exiting from receiver mode
+            self.reset_receiving();
+            self.address_text.clear();
+        }
+
         self.page = PageView::default();
-        self.address_text.clear();
-        self.sender = None;
-        self.socket_created = false;
-        self.streaming_active = false;
-        self.started_capture = false;
-        //self.frame_rx = None;
     }
 
     fn set_page(&mut self, page: PageView) {
@@ -850,17 +866,7 @@ impl RustreamApp {
                             .min_size(egui::vec2(60.0, 30.0));
 
                             if ui.add(stop_button).clicked() {
-                                self.stop_notify.notify_waiters();
-                                self.host_unreachable.store(false, Ordering::SeqCst);
-                                self.receiver = None;
-                                self.receiver_rx = None;
-                                self.display_texture = None;
-                                self.is_receiving = false;
-                                let mut frames = self.received_frames.lock().unwrap();
-                                frames.clear();
-                                self.last_frame_time = None;
-                                self.frame_times.clear();
-                                self.current_fps = 0.0;
+                                self.reset_receiving();
                             }
                         });
 
@@ -993,6 +999,20 @@ impl RustreamApp {
                 ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
             });
         });
+    }
+
+    fn reset_receiving(&mut self) {
+        self.stop_notify.notify_waiters();
+        self.host_unreachable.store(false, Ordering::SeqCst);
+        self.receiver = None;
+        self.receiver_rx = None;
+        self.display_texture = None;
+        self.is_receiving = false;
+        let mut frames = self.received_frames.lock().unwrap();
+        frames.clear();
+        self.last_frame_time = None;
+        self.frame_times.clear();
+        self.current_fps = 0.0;
     }
 
     fn update_fps_counter(&mut self) {

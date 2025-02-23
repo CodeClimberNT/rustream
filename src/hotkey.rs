@@ -11,6 +11,8 @@ pub enum HotkeyAction {
     // TODO: Add more actions
     // TogglePreview,
     // Quit,
+    // Blanking the screen,
+    // Terminating the current session
 }
 
 impl HotkeyAction {

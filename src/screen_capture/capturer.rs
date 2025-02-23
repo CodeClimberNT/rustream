@@ -5,7 +5,7 @@ use log::{debug, error};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
     thread,
 };
 
@@ -25,6 +25,7 @@ pub struct ScreenCapture {
     capturer: Option<Capturer>,
     width: usize,
     height: usize,
+    stop_capture: Arc<AtomicBool>,
 }
 
 impl Default for ScreenCapture {
@@ -48,6 +49,7 @@ impl ScreenCapture {
             capturer: None,
             width: 0,
             height: 0,
+            stop_capture: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -55,6 +57,7 @@ impl ScreenCapture {
         self.capturer = None;
         self.width = 0;
         self.height = 0;
+        self.stop_capture.store(true, Ordering::SeqCst); // Stop the capture thread
     }
 
     pub fn get_monitors(&self) -> &Vec<String> {
@@ -112,27 +115,16 @@ impl ScreenCapture {
     }*/
 
     pub fn capture_frame(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
-        //-> Option<CapturedFrame>  tx: mpsc::SyncSender<CapturedFrame>
-
-        //if self.capturer.is_none() {
-
-        //}
-        //let capturer = self.capturer.as_ref().unwrap();
-        /*let mut no_capturer;
-        if self.capturer.is_none() {
-            no_capturer = true;
-        } else {
-            no_capturer = false;
-        }*/
 
         let config = self.config.clone();
+        let stop_capture = self.stop_capture.clone();
 
         thread::spawn(move || {
             let mut current_monitor_index: Option<usize> = None;
             let mut capturer: Option<Capturer> = None;
             let mut current_dimensions = (0, 0);
 
-            loop {
+            while !stop_capture.load(Ordering::SeqCst) {
                 // Check if monitor selection changed
                 let new_monitor_index = {
                     let conf_lock = config.lock().unwrap();
@@ -211,6 +203,7 @@ impl ScreenCapture {
                 }
                 thread::sleep(std::time::Duration::from_millis(1000 / 6));
             }
+            println!("Capture thread stopped");
         });
     }
 }
