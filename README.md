@@ -1,4 +1,4 @@
-![Project CI Status](https://github.com/CodeClimberNT/multi-platform-screen-casting/actions/workflows/rust.yml/badge.svg?branch=main)
+![Project CI Status](https://github.com/CodeClimberNT/rustream/actions/workflows/rust.yml/badge.svg?branch=main)
 # Welcome to RUSTREAM
 
 ## Multi-platform screen-casting
