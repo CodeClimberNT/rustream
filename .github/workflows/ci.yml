@@ -49,8 +49,11 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # - name: Run tests
-      #   run: cargo test --verbose
+      - name: Fetch dependencies
+        run: cargo fetch
+
+      - name: Run tests
+        run: cargo test --verbose
 
       - name: Build Release Binary
         shell: bash
