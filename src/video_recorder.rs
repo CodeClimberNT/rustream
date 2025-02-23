@@ -1,4 +1,4 @@
-use crate::config::{ Config, VideoConfig};
+use crate::config::{Config, VideoConfig};
 use crate::screen_capture::CapturedFrame;
 
 use log::{debug, error, info};
@@ -185,6 +185,14 @@ impl VideoRecorder {
         info!("Generating video...");
 
         let mut command = Command::new("ffmpeg");
+
+        // Platform-specific configuration to hide window
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
 
         // Add verbose logging
         command.arg("-v").arg("debug").arg("-stats");

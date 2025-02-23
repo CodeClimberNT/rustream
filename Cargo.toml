@@ -13,21 +13,21 @@
 [dependencies]
     # UI, (wgpu use gfx to create a HAL: https://github.com/gfx-rs/gfx#hardware-abstraction-layer)
     egui = { version = "0.31.0", features = [
-        "bytemuck",
+        # "bytemuck",
         # Enable to debug if the app freezes
-        "deadlock_detection",
+        # "deadlock_detection",
         "default_fonts",
-        "serde",
+        # "serde",
     ], default-features = false }
     eframe = { version = "0.31.0", features = [
-        "__screenshot",
-        "serde",
+        # "__screenshot",
+        # "serde",
         "wgpu",
         "x11",
         "glow",
     ], default-features = false }
     egui_extras = { version = "0.31.0", features = [
-        "serde",
+        # "serde",
         "svg",
     ], default-features = false }
 

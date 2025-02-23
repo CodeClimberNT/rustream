@@ -179,7 +179,17 @@ impl CapturedFrame {
         //     _ => (["", ""], ["-c:v", "hevc"]),
         // };
 
-        let mut ffmpeg = Command::new("ffmpeg")
+        let mut command = Command::new("ffmpeg");
+
+        // Platform-specific configuration to hide window
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut ffmpeg = command
             .args([
                 //gpu_acceleration[0], gpu_acceleration[1],
                 "-f",
