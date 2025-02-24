@@ -60,9 +60,11 @@
 
     display-info = { git = "https://github.com/DanieleBrCoding/display-info" }
 
-    # Decoding
+    # Validation
     regex = "1.5"
-    tokio = { version = "1.42.0", features = ["full"] }
+
+    # Asyncronous Multi-threading
+    tokio = { version = "1.42.0", features = ["full"]}
 
 [target.'cfg(target_os = "linux")'.dependencies]
     async-lock = { version = "3.4.0", features = [

@@ -813,8 +813,7 @@ impl RustreamApp {
                     ui.add_space(20.0);
 
                     //if connect button is clicked
-                    if ui
-                        .add_enabled(!self.address_text.trim().is_empty(), connect_button)
+                    if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button)
                         .clicked()
                     {
                         //check if inserted address is valid
@@ -931,18 +930,13 @@ impl RustreamApp {
                     let host_unreachable = self.host_unreachable.clone();
 
                     tokio::spawn(async move {
-                        let receiver = receiver_clone.lock().await;
+                        let mut receiver = receiver_clone.lock().await;
 
                         //start receiving only if it's the first time
                         if !receiver.started_receiving {
+                            receiver.started_receiving = true;
                             drop(receiver); //drop the lock before starting the receiving task
-                            start_receiving(
-                                rcv_frames,
-                                receiver_clone,
-                                stop_notify,
-                                host_unreachable,
-                            )
-                            .await;
+                            start_receiving(rcv_frames, receiver_clone, stop_notify, host_unreachable).await;
                         }
                     });
 
@@ -981,8 +975,8 @@ impl RustreamApp {
                         self.update_fps_counter();
                     } else {
                         // Add a loading indicator while waiting for receiver initialization
-                        if self.display_texture.is_none()
-                            && !self.host_unreachable.load(Ordering::SeqCst)
+                        if self.display_texture.is_none() 
+                        && !self.host_unreachable.load(Ordering::SeqCst)
                         {
                             ui.add_space(40.0);
                             ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting

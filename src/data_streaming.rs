@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::time::{interval, Duration, Interval};
 
 use crate::screen_capture::CapturedFrame;
 
@@ -197,6 +198,7 @@ pub async fn start_streaming(
 pub struct Receiver {
     pub socket: UdpSocket, //Arc<UdpSocket>
     pub started_receiving: bool,
+    caster: SocketAddr,
 }
 
 impl Receiver {
@@ -206,6 +208,7 @@ impl Receiver {
         let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
         println!("Socket {} ", sock.local_addr().unwrap());
         let buf = "REQ_FRAMES".as_bytes();
+        
         if let Ok(_) = sock.connect(caster).await {
             //connects socket to send/receive only from sender_addr
             match sock.send(buf).await {
@@ -227,22 +230,36 @@ impl Receiver {
         Self {
             socket: sock, //Arc::new(sock),
             started_receiving: false,
+            caster: caster,
         }
     }
 
-    //send datagram to caster to request the streaming
-    /*pub async fn connect_to_sender(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    //try reconnection to the sender
+    pub async fn reconnect_to_sender(&self) -> Result<(), std::io::Error> {
         //let socket = UdpSocket::bind("0.0.0.0:0").await?;
-        let buf = "REQ_FRAME".as_bytes();
-        self.socket.connect(self.caster).await?; //connects socket to send/receive only from sender_addr
-        match self.socket.try_send(buf) {
-            Ok(_) => {
-                println!("Connected to sender");
-                Ok(())
+        let buf = "REQ_FRAMES".as_bytes();
+        if let Ok(_) = self.socket.connect(self.caster).await {
+            //connects socket to send/receive only from sender_addr
+            match self.socket.send(buf).await {
+                //send datagram to caster to request the streaming
+                Ok(_) => {
+                    println!("Connected to sender");
+                    Ok(())
+                }
+                Err(e) if e.kind() == ErrorKind::ConnectionReset => {
+                    eprintln!("Destination unreachable: {}", e);
+                    return Err(e);
+                }
+                Err(e) => {
+                    println!("Failed to send registration request: {}", e);
+                    return Err(e);
+                }
             }
-            Err(_) => Err("Failed to connect to sender")?,
         }
-    }*/
+        else {
+            return Err(std::io::Error::new(ErrorKind::ConnectionReset, "Failed to connect to sender"));
+        }
+    }
 
     pub async fn recv_data(
         &mut self,
@@ -268,7 +285,6 @@ impl Receiver {
 
                 res = self.socket.recv_from(&mut buf) => { // Keep listening for UDP packets
                     match res {
-            //match self.socket.recv_from(&mut buf).await {
                         Ok((len, _)) => {
 
                             let frame_id = u32::from_ne_bytes(buf[4..8].try_into().unwrap());
@@ -391,6 +407,17 @@ pub async fn start_receiving(
         if let Err(_) = recv.recv_data(tx, stop_notify1).await{
             //println!("Error receiving frame: {}", e);
             host_unreachable.store(true, Ordering::SeqCst);
+           
+            //let mut timer = interval(Duration::from_secs(5)); // Runs every 5 seconds
+
+            //Try to reconnect every 5 seconds until reconnected
+            /*loop {
+                timer.tick().await; // Wait for the next tick
+                println!("Trying to reconnect to sender");
+                if let Ok(_) = recv.reconnect_to_sender().await { // non funziona, dà sempre ok anche se sender non è raggiungibile
+                    break;
+                }
+            }*/
         }
         drop(recv);           
     });
