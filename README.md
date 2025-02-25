@@ -1,4 +1,4 @@
-![Project CI Status](https://github.com/CodeClimberNT/rustream/actions/workflows/rust.yml/badge.svg?branch=main)
+![Project CI Status](https://github.com/CodeClimberNT/rustream/actions/workflows/ci.yml/badge.svg?branch=main)
 # Welcome to RUSTREAM
 
 ## Multi-platform screen-casting
@@ -6,7 +6,8 @@ PDS project of an application written in rust to host and watch a streaming in r
 
 ### Description
 Using the Rust programming language, create a screencasting application capable of continuously
-grabbing the content of the screen (or a portion of it) and stream it to a set of peers.<br><br>
+grabbing the content of the screen (or a portion of it) and stream it to a set of peers.
+
 The application should fulfill the following requirements:
 1. [x] Platform Support: The utility should be compatible with multiple desktop operating systems,
 including Windows, macOS, and Linux.

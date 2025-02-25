@@ -138,7 +138,25 @@ jobs:
           ls -R dist/
           echo "Available artifacts:"
           find dist -type f
-  
+          
+      - name: Get latest tag
+        run: |
+          git fetch --tags
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        run: |
+          current_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          current_tag="${current_tag#v}"  # Removes the 'v' prefix
+          IFS='.' read -ra PARTS <<< "$current_tag"
+          major=${PARTS[0]:-0}
+          minor=${PARTS[1]:-0}
+          patch=${PARTS[2]:-0}
+          patch=$((patch + 1))  # Increments the patch version
+          new_version="$major.$minor.$patch"
+          echo "version=$new_version" >> $GITHUB_OUTPUT
+        
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -149,5 +167,5 @@ jobs:
             dist/rustream-windows-amd64.exe/rustream-windows.exe
             dist/rustream-macos-amd64/rustream-macos
           draft: false
-          prerelease: false
+          prerelease: true
           token: ${{ secrets.GITHUB_TOKEN }}

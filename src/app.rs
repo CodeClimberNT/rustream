@@ -37,8 +37,8 @@ pub struct RustreamApp {
     display_texture: Option<TextureHandle>,               // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>,          // List of textures
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
-    address_text: String,              // Text input for the receiver mode
-    caster_addr: Option<SocketAddr>,   // Socket Address defined by user in receiver mode
+    address_text: String,                                 // Text input for the receiver mode
+    caster_addr: Option<SocketAddr>, // Socket Address defined by user in receiver mode
     streaming_active: bool,
     is_selecting: bool,
     cropped_frame: Option<CapturedFrame>,
@@ -60,6 +60,7 @@ pub struct RustreamApp {
     previous_monitor: usize,
     is_address_valid: bool,
     host_unreachable: Arc<AtomicBool>,
+    preview_stream: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -168,6 +169,7 @@ impl RustreamApp {
             cropped_frame: None,
             is_address_valid: true,
             host_unreachable: Arc::new(AtomicBool::new(false)),
+            preview_stream: true,
         }
     }
 
@@ -178,28 +180,26 @@ impl RustreamApp {
     }
 
     fn reset_ui(&mut self) {
- 
         // Reset the application when retuning to the home page
-        if self.page == PageView::Caster { //if we are exiting from caster mode
-            
+        if self.page == PageView::Caster {
+            //if we are exiting from caster mode
+
             self.frame_grabber.reset_capture();
             self.stop_notify.notify_waiters();
             self.sender = None;
             self.sender_rx = None;
             self.socket_created = false;
             self.streaming_active = false;
-            self.started_capture = false;            
+            self.started_capture = false;
             let mut frames = self.captured_frames.lock().unwrap();
-            frames.clear(); 
+            frames.clear();
             drop(frames);
             self.cropped_frame = None;
             self.display_texture = None;
             self.capture_area = None;
             self.video_recorder = None; //dropping video recorder, the video is saved
-            
-        }        
-        
-        else if self.page == PageView::Receiver { //if we are exiting from receiver mode
+        } else if self.page == PageView::Receiver {
+            //if we are exiting from receiver mode
             self.reset_receiving();
             self.address_text.clear();
         }
@@ -219,9 +219,21 @@ impl RustreamApp {
                 self.reset_ui();
             }
 
-            // ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Add any other Left to right elements here
-            // });
+            ui.vertical_centered(|ui| match self.page {
+                PageView::HomePage => {
+                    ui.label(RichText::new("Home").size(32.0).color(Color32::ORANGE))
+                }
+                PageView::Caster => ui.label(
+                    RichText::new("Caster Mode")
+                        .size(32.0)
+                        .color(Color32::ORANGE),
+                ),
+                PageView::Receiver => ui.label(
+                    RichText::new("Receiver Mode")
+                        .size(32.0)
+                        .color(Color32::ORANGE),
+                ),
+            });
         });
     }
 
@@ -577,7 +589,6 @@ impl RustreamApp {
     }
 
     fn render_recording_controls(&mut self, ui: &mut Ui) {
-
         if let Some(video_recorder) = &self.video_recorder {
             let recording = video_recorder.is_recording();
             let finalizing = video_recorder.is_finalizing();
@@ -587,7 +598,7 @@ impl RustreamApp {
                 ui.label("Finalizing video...");
                 return;
             }
-    
+
             if self.action_button(
                 ui,
                 if recording {
@@ -603,14 +614,11 @@ impl RustreamApp {
                     self.start_recording();
                 }
             }
-        }   
+        }
     }
 
     fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
-        ui.heading("Monitor Feedback");
-        ui.separator();
         ui.vertical_centered(|ui| {
-            //TODO: add toggle preview to save resources
             ui.horizontal(|ui| {
                 if self.action_button(
                     ui,
@@ -623,6 +631,18 @@ impl RustreamApp {
                 ) {
                     self.streaming_active = !self.streaming_active;
                     self.stop_notify.notify_waiters();
+                }
+
+                if self.action_button(
+                    ui,
+                    if self.preview_stream {
+                        "👁 Stop Preview Stream"
+                    } else {
+                        "👁 Preview Stream"
+                    },
+                    HotkeyAction::TogglePreview,
+                ) {
+                    self.preview_stream = !self.preview_stream;
                 }
 
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
@@ -767,18 +787,24 @@ impl RustreamApp {
                 };
 
                 // Update texture in memory
-                match self.display_texture {
-                    Some(ref mut texture) => {
-                        texture.set(image, egui::TextureOptions::default());
+                // TODO: possible code optimization to have only one time the default texture function loading
+                if self.preview_stream {
+                    match self.display_texture {
+                        Some(ref mut texture) => {
+                            texture.set(image, egui::TextureOptions::default());
+                        }
+                        None => {
+                            self.display_texture = Some(ctx.load_texture(
+                                "display_texture",
+                                image,
+                                egui::TextureOptions::default(),
+                            ));
+                        }
                     }
-                    None => {
-                        self.display_texture = Some(ctx.load_texture(
-                            "display_texture",
-                            image,
-                            egui::TextureOptions::default(),
-                        ));
-                    }
+                } else {
+                    self.display_texture = None;
                 }
+
                 ctx.request_repaint();
             }
 
@@ -792,8 +818,8 @@ impl RustreamApp {
     }
 
     pub fn receiver_page(&mut self, ctx: &Context, _ui: &mut Ui) {
-
-        if self.video_recorder.is_none() { // initialize video recorder
+        if self.video_recorder.is_none() {
+            // initialize video recorder
             self.video_recorder = Some(VideoRecorder::new(self.config.clone()));
         }
 
@@ -802,7 +828,6 @@ impl RustreamApp {
         self.render_recording_settings(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Receiver Mode");
             ui.vertical_centered(|ui| {
                 if !self.is_receiving {
                     ui.label(RichText::new("Enter the Sender's IP Address").size(15.0));
@@ -827,7 +852,8 @@ impl RustreamApp {
                     ui.add_space(20.0);
 
                     //if connect button is clicked
-                    if ui.add_enabled(!self.address_text.trim().is_empty(), connect_button)
+                    if ui
+                        .add_enabled(!self.address_text.trim().is_empty(), connect_button)
                         .clicked()
                     {
                         //check if inserted address is valid
@@ -950,7 +976,13 @@ impl RustreamApp {
                         if !receiver.started_receiving {
                             receiver.started_receiving = true;
                             drop(receiver); //drop the lock before starting the receiving task
-                            start_receiving(rcv_frames, receiver_clone, stop_notify, host_unreachable).await;
+                            start_receiving(
+                                rcv_frames,
+                                receiver_clone,
+                                stop_notify,
+                                host_unreachable,
+                            )
+                            .await;
                         }
                     });
 
@@ -965,7 +997,7 @@ impl RustreamApp {
                         if let Some(video_recorder) = &mut self.video_recorder {
                             if video_recorder.is_recording() {
                                 video_recorder.record_frame(&frame);
-                            }    
+                            }
                         }
 
                         // Convert to ColorImage for display
@@ -991,8 +1023,8 @@ impl RustreamApp {
                         self.update_fps_counter();
                     } else {
                         // Add a loading indicator while waiting for receiver initialization
-                        if self.display_texture.is_none() 
-                        && !self.host_unreachable.load(Ordering::SeqCst)
+                        if self.display_texture.is_none()
+                            && !self.host_unreachable.load(Ordering::SeqCst)
                         {
                             ui.add_space(40.0);
                             ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
@@ -1049,16 +1081,14 @@ impl RustreamApp {
     }
 
     fn start_recording(&mut self) {
-        
         if let Some(video_recorder) = &mut self.video_recorder {
             video_recorder.start();
         }
     }
 
     fn stop_recording(&mut self) {
-
         if let Some(video_recorder) = &mut self.video_recorder {
-            video_recorder.stop();
+            video_recorder.stop(Some(self.current_fps as u32));
         }
     }
 

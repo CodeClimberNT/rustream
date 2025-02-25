@@ -3,13 +3,13 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum HotkeyAction {
-    ToggleStreaming,
     Annotation,
-    StartRecording,
-    Home,
     ClosePopup,
+    Home,
+    StartRecording,
+    ToggleStreaming,
+    TogglePreview,
     // TODO: Add more actions
-    // TogglePreview,
     // Quit,
     // Blanking the screen,
     // Terminating the current session
@@ -89,15 +89,15 @@ impl HotkeyManager {
             },
             HotkeyAction::ToggleStreaming,
         );
-        // self.default_shortcuts.insert(
-        //     KeyCombination {
-        //         ctrl: false,
-        //         shift: false,
-        //         alt: false,
-        //         key: Key::P,
-        //     },
-        //     HotkeyAction::TogglePreview,
-        // );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::P,
+            },
+            HotkeyAction::TogglePreview,
+        );
         self.default_shortcuts.insert(
             KeyCombination {
                 ctrl: false,
