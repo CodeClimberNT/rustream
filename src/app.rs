@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::data_streaming::{start_receiving, start_streaming, Receiver, Sender, PORT};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
-use crate::video_recorder::VideoRecorder;
+use crate::video_recorder::{self, VideoRecorder};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -31,7 +31,7 @@ pub struct RustreamApp {
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of frames recived by receiver
     pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
     frame_grabber: ScreenCapture,
-    video_recorder: VideoRecorder,
+    video_recorder: Option<VideoRecorder>,
     page: PageView,                                       // Enum to track modes
     display_texture: Option<TextureHandle>,               // Texture for the screen capture
     textures: HashMap<TextureId, TextureHandle>,          // List of textures
@@ -132,12 +132,12 @@ impl RustreamApp {
 
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
-        let video_recorder = VideoRecorder::new(config.clone());
+        //let video_recorder = VideoRecorder::new(config.clone());
 
         RustreamApp {
             config,
             frame_grabber,
-            video_recorder,
+            video_recorder: None,
             textures,
             sender: None,
             sender_rx: None,
@@ -193,6 +193,7 @@ impl RustreamApp {
             self.cropped_frame = None;
             self.display_texture = None;
             self.capture_area = None;
+            self.video_recorder = None; //dropping video recorder, the video is saved
             
         }        
         
@@ -574,31 +575,35 @@ impl RustreamApp {
     }
 
     fn render_recording_controls(&mut self, ui: &mut Ui) {
-        let recording = self.video_recorder.is_recording();
-        let finalizing = self.video_recorder.is_finalizing();
 
-        if finalizing {
-            ui.spinner();
-            ui.label("Finalizing video...");
-            return;
-        }
+        if let Some(video_recorder) = &self.video_recorder {
+            let recording = video_recorder.is_recording();
+            let finalizing = video_recorder.is_finalizing();
 
-        if self.action_button(
-            ui,
-            if recording {
-                "⏹ Stop Recording"
-            } else {
-                "⏺ Start Recording"
-            },
-            HotkeyAction::StartRecording,
-        ) {
-            if recording {
-                self.stop_recording();
-            } else {
-                self.start_recording();
+            if finalizing {
+                ui.spinner();
+                ui.label("Finalizing video...");
+                return;
             }
-        }
+    
+            if self.action_button(
+                ui,
+                if recording {
+                    "⏹ Stop Recording"
+                } else {
+                    "⏺ Start Recording"
+                },
+                HotkeyAction::StartRecording,
+            ) {
+                if recording {
+                    self.stop_recording();
+                } else {
+                    self.start_recording();
+                }
+            }
+        }   
     }
+
     fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
         ui.heading("Monitor Feedback");
         ui.separator();
@@ -783,6 +788,11 @@ impl RustreamApp {
     }
 
     pub fn receiver_page(&mut self, ctx: &Context, _ui: &mut Ui) {
+
+        if self.video_recorder.is_none() { // initialize video recorder
+            self.video_recorder = Some(VideoRecorder::new(self.config.clone()));
+        }
+
         self.show_fps_counter(ctx);
         // Render the recording settings window if it's open
         self.render_recording_settings(ctx);
@@ -948,8 +958,10 @@ impl RustreamApp {
                     };
 
                     if let Some(frame) = frame {
-                        if self.video_recorder.is_recording() {
-                            self.video_recorder.record_frame(&frame);
+                        if let Some(video_recorder) = &mut self.video_recorder {
+                            if video_recorder.is_recording() {
+                                video_recorder.record_frame(&frame);
+                            }    
                         }
 
                         // Convert to ColorImage for display
@@ -1007,6 +1019,7 @@ impl RustreamApp {
         self.last_frame_time = None;
         self.frame_times.clear();
         self.current_fps = 0.0;
+        self.video_recorder = None;
     }
 
     fn update_fps_counter(&mut self) {
@@ -1032,12 +1045,17 @@ impl RustreamApp {
     }
 
     fn start_recording(&mut self) {
-        // Then start video recording
-        self.video_recorder.start();
+        
+        if let Some(video_recorder) = &mut self.video_recorder {
+            video_recorder.start();
+        }
     }
 
     fn stop_recording(&mut self) {
-        self.video_recorder.stop();
+
+        if let Some(video_recorder) = &mut self.video_recorder {
+            video_recorder.stop();
+        }
     }
 
     fn action_button(&mut self, ui: &mut egui::Ui, label: &str, action: HotkeyAction) -> bool {

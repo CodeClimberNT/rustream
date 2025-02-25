@@ -287,12 +287,5 @@ impl Drop for VideoRecorder {
         if self.is_recording() {
             self.stop();
         }
-        let temp_dir = self.config.lock().unwrap().video.temp_dir.clone();
-        // Clean up temp directory if it exists
-        if temp_dir.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&temp_dir) {
-                error!("Failed to clean up temp directory on drop: {}", e);
-            }
-        }
     }
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
-use tokio::time::{interval, Duration, Interval};
+use tokio::time::{interval, Duration};
 
 use crate::screen_capture::CapturedFrame;
 
@@ -235,7 +235,7 @@ impl Receiver {
     }
 
     //try reconnection to the sender
-    pub async fn reconnect_to_sender(&self) -> Result<(), std::io::Error> {
+    /*pub async fn reconnect_to_sender(&self) -> Result<(), std::io::Error> {
         //let socket = UdpSocket::bind("0.0.0.0:0").await?;
         let buf = "REQ_FRAMES".as_bytes();
         if let Ok(_) = self.socket.connect(self.caster).await {
@@ -259,7 +259,7 @@ impl Receiver {
         else {
             return Err(std::io::Error::new(ErrorKind::ConnectionReset, "Failed to connect to sender"));
         }
-    }
+    }*/
 
     pub async fn recv_data(
         &mut self,
@@ -550,16 +550,11 @@ fn get_h265_dimensions(
 
     let mut ffmpeg = command
         .args([
-            "-f",
-            "hevc",
-            "-i",
-            "pipe:0",
-            "-vframes",
-            "1", // Process only first frame
-            "-vf",
-            "scale=iw:ih", // Force scale filter to report size
-            "-f",
-            "null",
+            "-f", "hevc",
+            "-i", "pipe:0",
+            "-vframes", "1", // Process only first frame
+            "-vf", "scale=iw:ih", // Force scale filter to report size
+            "-f", "null",
             "-",
         ])
         .stdin(Stdio::piped())
