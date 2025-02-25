@@ -1084,7 +1084,7 @@ impl RustreamApp {
 
     fn stop_recording(&mut self) {
         if let Some(video_recorder) = &mut self.video_recorder {
-            video_recorder.stop();
+            video_recorder.stop(Some(self.current_fps as u32));
         }
     }
 

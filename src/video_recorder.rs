@@ -134,7 +134,7 @@ impl VideoRecorder {
         }
     }
 
-    pub fn stop(&mut self) -> bool {
+    pub fn stop(&mut self, fps: Option<u32>) -> bool {
         if !self.is_recording.load(Ordering::SeqCst) {
             return false;
         }
@@ -152,6 +152,10 @@ impl VideoRecorder {
         let config = self.config.clone();
         let is_finalizing = self.is_finalizing.clone();
         let frame_counter = self.frame_counter;
+        let fps = match fps {
+            Some(val) => val,
+            None => config.lock().unwrap().video.fps,
+        };
 
         std::thread::spawn(move || {
             // Wait for frame writer to finish
@@ -167,10 +171,10 @@ impl VideoRecorder {
                 "Recording metrics - Frames: {}, Duration: {:.2}s, Calculated FPS: {}",
                 frame_counter,
                 start_time.map_or(0.0, |t| t.elapsed().as_secs_f64()),
-                video_config.fps
+                fps,
             );
 
-            VideoRecorder::run_ffmpeg_command(&video_config);
+            VideoRecorder::run_ffmpeg_command(&video_config, fps);
             std::fs::remove_dir_all(&video_config.temp_dir)
                 .expect("Failed to clean temp directory");
             is_finalizing.store(false, Ordering::SeqCst);
@@ -179,10 +183,9 @@ impl VideoRecorder {
         true
     }
 
-    fn run_ffmpeg_command(video_config: &VideoConfig) {
+    fn run_ffmpeg_command(video_config: &VideoConfig, fps: u32) {
         let output_path = Self::generate_unique_path(video_config.output_path.clone());
         info!("Generating video...");
-        let fps = video_config.fps;
         let mut command = Command::new("ffmpeg");
 
         // Platform-specific configuration to hide window
@@ -285,7 +288,7 @@ impl VideoRecorder {
 impl Drop for VideoRecorder {
     fn drop(&mut self) {
         if self.is_recording() {
-            self.stop();
+            self.stop(None);
         }
     }
 }
