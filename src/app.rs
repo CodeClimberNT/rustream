@@ -1,6 +1,7 @@
 use crate::common::CaptureArea;
 use crate::config::Config;
-use crate::data_streaming::{start_receiving, start_streaming, Receiver, Sender, PORT};
+use crate::sender::{start_streaming, Sender, PORT};
+use crate::receiver::{start_receiving, Receiver};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::video_recorder::{self, VideoRecorder};
@@ -29,7 +30,7 @@ use log::{debug, error, info};
 pub struct RustreamApp {
     pub config: Arc<Mutex<Config>>,
     pub received_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of frames recived by receiver
-    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task
+    pub stop_notify: Arc<Notify>, // Notify to stop the frame receiving task in receiver or the listen for receiver task in sender
     frame_grabber: ScreenCapture,
     video_recorder: Option<VideoRecorder>,
     page: PageView,                                       // Enum to track modes
@@ -182,6 +183,7 @@ impl RustreamApp {
         if self.page == PageView::Caster { //if we are exiting from caster mode
             
             self.frame_grabber.reset_capture();
+            self.stop_notify.notify_waiters();
             self.sender = None;
             self.sender_rx = None;
             self.socket_created = false;
@@ -620,6 +622,7 @@ impl RustreamApp {
                     HotkeyAction::ToggleStreaming,
                 ) {
                     self.streaming_active = !self.streaming_active;
+                    self.stop_notify.notify_waiters();
                 }
 
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
@@ -677,6 +680,7 @@ impl RustreamApp {
                     if self.sender.is_none() && !self.socket_created {
                         let (tx, rx) = channel();
                         self.socket_created = true;
+                        
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
@@ -724,10 +728,10 @@ impl RustreamApp {
                             );
                         }
                         // Send a cropped frame if we have one, otherwise send the full frame
-                        let clone_frame =
-                            self.cropped_frame.clone().unwrap_or(display_frame.clone());
+                        let clone_frame =self.cropped_frame.clone().unwrap_or(display_frame.clone());
+                        let stop_notify = self.stop_notify.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = start_streaming(sender_clone, clone_frame).await {
+                            if let Err(e) = start_streaming(sender_clone, clone_frame, stop_notify).await {
                                 eprintln!("Error sending frame: {}", e);
                             }
                         });
