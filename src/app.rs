@@ -1,9 +1,9 @@
 use crate::common::CaptureArea;
 use crate::config::Config;
-use crate::sender::{start_streaming, Sender, PORT};
-use crate::receiver::{start_receiving, Receiver};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
+use crate::receiver::{start_receiving, Receiver};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
+use crate::sender::{start_streaming, Sender, PORT};
 use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -632,7 +632,6 @@ impl RustreamApp {
                     self.streaming_active = !self.streaming_active;
                     self.stop_notify.notify_waiters();
                     self.captured_frames.lock().unwrap().clear();
-
                 }
 
                 if self.action_button(
@@ -702,7 +701,6 @@ impl RustreamApp {
                     if self.sender.is_none() && !self.socket_created {
                         let (tx, rx) = channel();
                         self.socket_created = true;
-                        
 
                         tokio::spawn(async move {
                             let sender = Sender::new().await;
@@ -750,10 +748,13 @@ impl RustreamApp {
                             );
                         }
                         // Send a cropped frame if we have one, otherwise send the full frame
-                        let clone_frame =self.cropped_frame.clone().unwrap_or(display_frame.clone());
+                        let clone_frame =
+                            self.cropped_frame.clone().unwrap_or(display_frame.clone());
                         let stop_notify = self.stop_notify.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = start_streaming(sender_clone, clone_frame, stop_notify).await {
+                            if let Err(e) =
+                                start_streaming(sender_clone, clone_frame, stop_notify).await
+                            {
                                 eprintln!("Error sending frame: {}", e);
                             }
                         });
