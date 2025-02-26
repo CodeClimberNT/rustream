@@ -1,10 +1,13 @@
 use std::net::SocketAddr;
 use std::str::from_utf8;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::thread::spawn;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinSet;
+use tokio::time::sleep;
+use tokio::time::Duration;
 
 use crate::screen_capture::CapturedFrame;
 
@@ -103,44 +106,78 @@ impl Sender {
 
     pub async fn send_data(&mut self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
         let receivers = self.receivers.lock().await;
+        
+        // Return early if no receivers
         if receivers.is_empty() {
             println!("No receivers connected");
-            return Ok(()); // Return early if no receivers
+            return Ok(()); 
         }
+
         let start = Instant::now();
         let encoded_frame = frame.encode_to_h265()?;
         let encode_time = start.elapsed();
         println!("Encoding time: {:?}", encode_time);
         println!("Frame encoded to h265");
 
-        //increase frame_id
+        // Increase frame_id
         self.frame_id += 1;
-        println!("Frame id: {:?}", self.frame_id);
+        let fid = self.frame_id;
+        println!("Frame id: {:?}", fid);
 
-        let mut seq_num: u16 = 0;
+        //let mut seq_num: u16; //  = 0 se for chunk for peer
         //encoded_frame size = num elements (len()) * size of element (u8)[1 byte]
         let total_chunks = (encoded_frame.len() as f32
             / (MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) as f32)
             .ceil() as u16;
         println!("Total chunks: {:?}", total_chunks);
 
-        for chunk in encoded_frame.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
-            let mut pkt = Vec::new();
-            pkt.extend_from_slice(&seq_num.to_ne_bytes()); //&seq_num.to_ne_bytes()
-            pkt.extend_from_slice(&total_chunks.to_ne_bytes());
-            pkt.extend_from_slice(&self.frame_id.to_ne_bytes());
-            pkt.extend_from_slice(chunk);
+        //let mut tasks = Vec::new();
+        let encoded_frame = Arc::new(encoded_frame);
+        //let mut set = JoinSet::new();
 
-            for &peer in receivers.iter() {
-                if let Err(e) = self.socket.send_to(&pkt, peer).await {
-                    eprintln!("Error sending to {}: {}", peer, e);
+        for &peer in receivers.iter() {
+        
+            let socket = self.socket.clone();
+            let encoded_frame1 = encoded_frame.clone();
+            
+            
+            tokio::spawn( async move {
+                let mut seq_num: u16 = 0;
+
+                for chunk in &mut encoded_frame1.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
+                    //let pkt1 = pkt.clone();
+                
+                    let mut pkt = Vec::new();
+                    pkt.extend_from_slice(&seq_num.to_ne_bytes()); //&seq_num.to_ne_bytes()
+                    pkt.extend_from_slice(&total_chunks.to_ne_bytes());
+                    pkt.extend_from_slice(&fid.to_ne_bytes());
+                    pkt.extend_from_slice(chunk);
+
+                    if let Err(e) = socket.send_to(&pkt, peer).await {
+                        eprintln!("Error sending to {}: {}", peer, e);
+                    }
+                    println!("Sent chunk {:?} to peer {}", seq_num, peer);
+                    
+                    /*if let Err(e) = self.socket.send_to(&pkt, peer).await {
+                        eprintln!("Error sending to {}: {}", peer, e);
+                    }
+                    println!("Sent chunk {:?} to peer {}", seq_num, peer);*/
+                    // Small delay to avoid flooding the network
+                    //sleep(Duration::from_micros(600)).await;
+                    seq_num += 1;
+                    //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
                 }
-                println!("Sent chunk {:?} to peer {}", seq_num, peer);
-                //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
-            }
-            seq_num += 1;
+            });
+            //seq_num += 1;
+            
         }
-        drop(encoded_frame);
+
+        // Wait for all tasks to complete
+        /*while let Some(res) = set.join_next().await {
+            if let Err(e) = res {
+                eprintln!("Task failed: {:?}", e);
+            }
+        }*/
         Ok(())
     }
 }

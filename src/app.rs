@@ -1266,6 +1266,6 @@ impl eframe::App for RustreamApp {
 
         self.triggered_actions.clear();
         //ctx.request_repaint();
-        ctx.request_repaint_after(Duration::from_millis(200));
+        ctx.request_repaint_after(Duration::from_millis(300));
     }
 }
