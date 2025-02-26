@@ -4,7 +4,7 @@ use crate::sender::{start_streaming, Sender, PORT};
 use crate::receiver::{start_receiving, Receiver};
 use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
-use crate::video_recorder::{self, VideoRecorder};
+use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -631,6 +631,8 @@ impl RustreamApp {
                 ) {
                     self.streaming_active = !self.streaming_active;
                     self.stop_notify.notify_waiters();
+                    self.captured_frames.lock().unwrap().clear();
+
                 }
 
                 if self.action_button(
@@ -1271,6 +1273,6 @@ impl eframe::App for RustreamApp {
 
         self.triggered_actions.clear();
         //ctx.request_repaint();
-        ctx.request_repaint_after(Duration::from_millis(200));
+        ctx.request_repaint_after(Duration::from_millis(300));
     }
 }
