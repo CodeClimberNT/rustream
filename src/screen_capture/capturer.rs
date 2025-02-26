@@ -57,6 +57,10 @@ impl ScreenCapture {
         self.capturer = None;
         self.width = 0;
         self.height = 0;
+    }
+    
+    pub fn stop_capture(&mut self) {
+        self.reset_capture();
         self.stop_capture.store(true, Ordering::SeqCst); // Stop the capture thread
     }
 

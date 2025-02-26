@@ -4,7 +4,7 @@ use crate::hotkey::{HotkeyAction, HotkeyManager, KeyCombination};
 use crate::receiver::{start_receiving, Receiver};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::sender::{start_streaming, Sender, PORT};
-use crate::video_recorder::{self, VideoRecorder};
+use crate::video_recorder::VideoRecorder;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -41,7 +41,7 @@ pub struct RustreamApp {
     caster_addr: Option<SocketAddr>, // Socket Address defined by user in receiver mode
     streaming_active: bool,
     is_selecting: bool,
-    cropped_frame: Option<CapturedFrame>,
+    // captured_frame: Option<CapturedFrame>,
     capture_area: Option<CaptureArea>,
     show_config: bool, // Show config window
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
@@ -166,7 +166,7 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            cropped_frame: None,
+            // captured_frame: None,
             is_address_valid: true,
             host_unreachable: Arc::new(AtomicBool::new(false)),
             preview_stream: true,
@@ -183,8 +183,7 @@ impl RustreamApp {
         // Reset the application when retuning to the home page
         if self.page == PageView::Caster {
             //if we are exiting from caster mode
-
-            self.frame_grabber.reset_capture();
+            self.frame_grabber.stop_capture();
             self.stop_notify.notify_waiters();
             self.sender = None;
             self.sender_rx = None;
@@ -194,7 +193,7 @@ impl RustreamApp {
             let mut frames = self.captured_frames.lock().unwrap();
             frames.clear();
             drop(frames);
-            self.cropped_frame = None;
+            // self.captured_frame = None;
             self.display_texture = None;
             self.capture_area = None;
             self.video_recorder = None; //dropping video recorder, the video is saved
@@ -220,19 +219,26 @@ impl RustreamApp {
             }
 
             ui.vertical_centered(|ui| match self.page {
-                PageView::HomePage => {
-                    ui.label(RichText::new("Home").size(32.0).color(Color32::ORANGE))
-                }
-                PageView::Caster => ui.label(
-                    RichText::new("Caster Mode")
-                        .size(32.0)
-                        .color(Color32::ORANGE),
-                ),
-                PageView::Receiver => ui.label(
-                    RichText::new("Receiver Mode")
-                        .size(32.0)
-                        .color(Color32::ORANGE),
-                ),
+                PageView::HomePage => ui
+                    .add(egui::Button::new(RichText::new("Home").size(32.0).color(Color32::ORANGE))
+                    .frame(false)
+                    .sense(egui::Sense::hover())),
+                PageView::Caster => ui
+                    .add(egui::Button::new(
+                        RichText::new("Caster Mode")
+                            .size(32.0)
+                            .color(Color32::ORANGE),
+                    )
+                    .frame(false)
+                    .sense(egui::Sense::hover())),
+                PageView::Receiver => ui
+                    .add(egui::Button::new(
+                        RichText::new("Receiver Mode")
+                            .size(32.0)
+                            .color(Color32::ORANGE),
+                    )
+                    .frame(false)
+                    .sense(egui::Sense::hover())),
             });
         });
     }
@@ -687,7 +693,7 @@ impl RustreamApp {
             }
 
             let mut frames = self.captured_frames.lock().unwrap();
-            if let Some(display_frame) = frames.pop_front() {
+            if let Some(mut display_frame) = frames.pop_front() {
                 //front().cloned()
                 if frames.len() >= 7 {
                     println!("Captured_Frames len: {}, dropping frames", frames.len());
@@ -695,6 +701,22 @@ impl RustreamApp {
                 }
 
                 drop(frames);
+
+                match self.capture_area {
+                    Some(area) => {
+                        display_frame = display_frame
+                            .view(
+                                area.x as u32,
+                                area.y as u32,
+                                area.width as u32,
+                                area.height as u32,
+                            )
+                            .unwrap();
+                    }
+                    None => {
+                        debug!("No capture area selected");
+                    }
+                }
 
                 if self.streaming_active {
                     // Initialize sender if it doesn't exist
@@ -739,17 +761,9 @@ impl RustreamApp {
                         }*/
 
                         // Store the cropped frame if a capture area is selected
-                        if let Some(area) = self.capture_area {
-                            self.cropped_frame = display_frame.clone().view(
-                                area.x as u32,
-                                area.y as u32,
-                                area.width as u32,
-                                area.height as u32,
-                            );
-                        }
+
                         // Send a cropped frame if we have one, otherwise send the full frame
-                        let clone_frame =
-                            self.cropped_frame.clone().unwrap_or(display_frame.clone());
+                        let clone_frame = display_frame.clone();
                         let stop_notify = self.stop_notify.clone();
                         tokio::spawn(async move {
                             if let Err(e) =
@@ -762,32 +776,10 @@ impl RustreamApp {
                 }
 
                 // Convert to ColorImage for display
-                let image: ColorImage = if let Some(area) = self.capture_area {
-                    // Apply cropping if we have a capture area
-                    if let Some(cropped) = display_frame.clone().view(
-                        area.x as u32,
-                        area.y as u32,
-                        area.width as u32,
-                        area.height as u32,
-                    ) {
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [cropped.width, cropped.height],
-                            &cropped.rgba_data, // Changed from frame_data to rgba_data
-                        )
-                    } else {
-                        // Fallback to full image if crop parameters are invalid
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [display_frame.width, display_frame.height],
-                            &display_frame.rgba_data, // Changed from frame_data to rgba_data
-                        )
-                    }
-                } else {
-                    // No crop area selected, show full image
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [display_frame.width, display_frame.height],
-                        &display_frame.rgba_data, // Changed from frame_data to rgba_data
-                    )
-                };
+                let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
+                    [display_frame.width, display_frame.height],
+                    &display_frame.rgba_data,
+                );
 
                 // Update texture in memory
                 // TODO: possible code optimization to have only one time the default texture function loading
