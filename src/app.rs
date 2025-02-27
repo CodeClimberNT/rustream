@@ -61,6 +61,9 @@ pub struct RustreamApp {
     is_address_valid: bool,
     host_unreachable: Arc<AtomicBool>,
     preview_stream: bool,
+    end_of_stream: bool,  // Flag to signal the end of the stream in the sender
+    stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
+    stopped_listening: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -170,6 +173,9 @@ impl RustreamApp {
             is_address_valid: true,
             host_unreachable: Arc::new(AtomicBool::new(false)),
             preview_stream: true,
+            end_of_stream: false,
+            stream_ended: Arc::new(AtomicBool::new(false)),
+            stopped_listening: false,
         }
     }
 
@@ -185,6 +191,7 @@ impl RustreamApp {
             //if we are exiting from caster mode
             self.frame_grabber.stop_capture();
             self.stop_notify.notify_waiters();
+            self.end_stream();
             self.sender = None;
             self.sender_rx = None;
             self.socket_created = false;
@@ -636,8 +643,25 @@ impl RustreamApp {
                     HotkeyAction::ToggleStreaming,
                 ) {
                     self.streaming_active = !self.streaming_active;
-                    self.stop_notify.notify_waiters();
-                    self.captured_frames.lock().unwrap().clear();
+
+                    if !self.streaming_active { //stop button pressed
+                        self.stop_notify.notify_waiters(); //
+                        self.captured_frames.lock().unwrap().clear();
+                        self.end_of_stream = true;
+                        self.stopped_listening = true;
+                    }
+                    else if self.stopped_listening { //start button pressed & stopped listening
+                        self.stopped_listening = false;
+                        if let Some(sender) = self.sender.clone(){
+                            
+                            tokio::spawn(async move {
+                                let mut sender = sender.lock().await;
+                                sender.started_sending = false; //restart the listen_for_receivers process
+        
+                            });
+                        }
+                        
+                    }
                 }
 
                 if self.action_button(
@@ -688,7 +712,6 @@ impl RustreamApp {
             if !self.started_capture {
                 //call capture_frame only once
                 self.started_capture = true;
-                //FIXME: capture area need to be sent across thread
                 self.frame_grabber.capture_frame(cap_frames);
             }
 
@@ -774,6 +797,10 @@ impl RustreamApp {
                         });
                     }
                 }
+                // Send the END_STREAM message if streaming is stopped
+                else if self.end_of_stream {    
+                    self.end_stream();
+                }
 
                 // Convert to ColorImage for display
                 let image: ColorImage = egui::ColorImage::from_rgba_unmultiplied(
@@ -800,7 +827,7 @@ impl RustreamApp {
                     self.display_texture = None;
                 }
 
-                ctx.request_repaint();
+                //ctx.request_repaint();
             }
 
             // Update texture in UI
@@ -931,6 +958,20 @@ impl RustreamApp {
                     );
                 }
 
+                // Show Stream Ended message
+                if self.stream_ended.load(Ordering::SeqCst) {
+                    //ui.add_space(60.0);
+                    ui.add_space(ui.available_size().y * 0.40);
+                    ui.label(
+                        RichText::new("End Of The Stream")
+                            .size(30.0),
+                    );
+      
+                    let mut frames = self.received_frames.lock().unwrap();
+                    frames.clear();
+                    self.display_texture = None;
+                }
+
                 // Check if we have a pending receiver initialization
                 if let Some(mut rx) = self.receiver_rx.take() {
                     //take consumes the receiver_rx
@@ -963,6 +1004,7 @@ impl RustreamApp {
                     let rcv_frames = self.received_frames.clone();
                     let stop_notify = self.stop_notify.clone();
                     let host_unreachable = self.host_unreachable.clone();
+                    let stream_ended = self.stream_ended.clone();
 
                     tokio::spawn(async move {
                         let mut receiver = receiver_clone.lock().await;
@@ -976,6 +1018,7 @@ impl RustreamApp {
                                 receiver_clone,
                                 stop_notify,
                                 host_unreachable,
+                                stream_ended
                             )
                             .await;
                         }
@@ -1020,6 +1063,7 @@ impl RustreamApp {
                         // Add a loading indicator while waiting for receiver initialization
                         if self.display_texture.is_none()
                             && !self.host_unreachable.load(Ordering::SeqCst)
+                            && !self.stream_ended.load(Ordering::SeqCst)
                         {
                             ui.add_space(40.0);
                             ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
@@ -1038,6 +1082,19 @@ impl RustreamApp {
         });
     }
 
+    fn end_stream(&mut self) {
+        if let Some(sender) = &self.sender {
+            let sender_clone = sender.clone();
+            
+            tokio::spawn(async move {
+            let sender = sender_clone.lock().await;
+            sender.end_stream().await;
+            });
+
+            self.end_of_stream = false; //reset the flag
+        }
+    }
+    
     fn reset_receiving(&mut self) {
         self.stop_notify.notify_waiters();
         self.host_unreachable.store(false, Ordering::SeqCst);
@@ -1051,6 +1108,7 @@ impl RustreamApp {
         self.frame_times.clear();
         self.current_fps = 0.0;
         self.video_recorder = None;
+        self.stream_ended.store(false, Ordering::SeqCst);
     }
 
     fn update_fps_counter(&mut self) {

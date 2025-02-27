@@ -20,7 +20,7 @@ pub struct Sender {
     socket: Arc<UdpSocket>,
     receivers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: u32,
-    started_sending: bool,
+    pub started_sending: bool,
 }
 
 impl Sender {
@@ -140,12 +140,10 @@ impl Sender {
             let socket = self.socket.clone();
             let encoded_frame1 = encoded_frame.clone();
             
-            
             tokio::spawn( async move {
                 let mut seq_num: u16 = 0;
 
                 for chunk in &mut encoded_frame1.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
-                    //let pkt1 = pkt.clone();
                 
                     let mut pkt = Vec::new();
                     pkt.extend_from_slice(&seq_num.to_ne_bytes()); //&seq_num.to_ne_bytes()
@@ -179,6 +177,24 @@ impl Sender {
             }
         }*/
         Ok(())
+    }
+
+    // Send end of stream messageto all receivers
+    pub async fn end_stream(&self) {
+        let mut receivers = self.receivers.lock().await;
+
+        for &peer in receivers.iter() {
+            let socket = self.socket.clone();
+            
+            tokio::spawn( async move {
+                let buf = "END_STREAM".as_bytes();
+                if let Err(e) = socket.send_to(&buf, peer).await {
+                    eprintln!("Error sending END_STREAM to {}: {}", peer, e);
+                }
+                println!("Sent END_STREAM to peer {}", peer);
+            });
+        }
+        //receivers.clear();
     }
 }
 

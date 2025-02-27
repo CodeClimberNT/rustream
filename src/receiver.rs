@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::io::ErrorKind::{self, ConnectionReset, WouldBlock};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::str::from_utf8;
 use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::time::{interval, Duration};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,11 +79,7 @@ impl Receiver {
         }
     }*/
 
-    pub async fn recv_data(
-        &mut self,
-        tx: mpsc::Sender<Vec<u8>>,
-        stop_notify: Arc<Notify>,
-    ) -> Result<(), std::io::Error> {
+    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>, stream_ended: Arc<AtomicBool> ) -> Result<(), std::io::Error> {
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
         let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
         let mut frame: Vec<u8> = Vec::new();
@@ -94,6 +91,7 @@ impl Receiver {
         loop {
             
             let mut buf = vec![0; MAX_DATAGRAM_SIZE];
+            
 
             tokio::select! {
                 _ = stop_notify.notified() => {
@@ -105,6 +103,21 @@ impl Receiver {
                     match res {
                         Ok((len, _)) => {
 
+                            // if received END_STREAM message, return earlier
+                            if let Ok(message) = from_utf8(&buf) {
+                                if message.trim_matches('\0') == "END_STREAM" {
+                                    println!("Received END_STREAM message");
+                                    stream_ended.store(true, Ordering::SeqCst);
+                                    //return Ok(());
+                                    continue;
+                                }
+                            }
+
+                            if  len > 8 {  // Ensure it's a frame and not an empty message
+                                stream_ended.store(false, Ordering::SeqCst);
+                            }
+                            
+                            //stream_ended.store(false, Ordering::SeqCst);
                             let frame_id = u32::from_ne_bytes(buf[4..8].try_into().unwrap());
 
                             let seq_num = u16::from_ne_bytes(buf[0..2].try_into().unwrap());
@@ -212,6 +225,7 @@ pub async fn start_receiving(
     receiver: Arc<Mutex<Receiver>>,
     stop_notify: Arc<Notify>,
     host_unreachable: Arc<AtomicBool>,
+    stream_ended: Arc<AtomicBool>
 ) {
     //println!("Inside start_receiving");
  
@@ -222,7 +236,7 @@ pub async fn start_receiving(
         let mut recv = receiver.lock().await;        
         println!("Calling recv_data");
         
-        if let Err(_) = recv.recv_data(tx, stop_notify1).await{
+        if let Err(_) = recv.recv_data(tx, stop_notify1, stream_ended).await{
             //println!("Error receiving frame: {}", e);
             host_unreachable.store(true, Ordering::SeqCst);
            
