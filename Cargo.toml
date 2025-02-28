@@ -26,16 +26,13 @@
         "x11",
         "glow",
     ], default-features = false }
-    egui_extras = { version = "0.31.0", features = [
-        # "serde",
-        "svg",
-    ], default-features = false }
 
     # Screen Capture and Image Processing
     scrap = "0.5.0"
     image = { version = "0.25.5", features = [
         "serde",
     ], default-features = false }
+    # ffmpeg-next = { version = "7.1.0" }
 
     # File System Utilities
     dirs = { version = "6.0.0", default-features = false }
@@ -63,8 +60,8 @@
     # Validation
     regex = "1.5"
 
-    # Asyncronous Multi-threading
-    tokio = { version = "1.42.0", features = ["full"]}
+    # Asynchronous Multi-threading
+    tokio = { version = "1.42.0", features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
     async-lock = { version = "3.4.0", features = [

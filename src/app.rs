@@ -35,7 +35,6 @@ pub struct RustreamApp {
     video_recorder: Option<VideoRecorder>,
     page: PageView,                                       // Enum to track modes
     display_texture: Option<TextureHandle>,               // Texture for the screen capture
-    textures: HashMap<TextureId, TextureHandle>,          // List of textures
     captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>, // Queue of captured frames
     address_text: String,                                 // Text input for the receiver mode
     caster_addr: Option<SocketAddr>, // Socket Address defined by user in receiver mode
@@ -60,48 +59,11 @@ pub struct RustreamApp {
     previous_monitor: usize,
     is_address_valid: bool,
     host_unreachable: Arc<AtomicBool>,
-    preview_stream: bool,
-    end_of_stream: bool,  // Flag to signal the end of the stream in the sender
+    is_preview_screen: bool,
+    end_of_stream: bool, // Flag to signal the end of the stream in the sender
     stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
     stopped_listening: bool,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum TextureId {
-    #[default]
-    Error,
-    HomeIcon,
-    QuitIcon,
-}
-
-impl std::fmt::Display for TextureId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Use enum name as string for egui texture identification
-        write!(f, "{:?}", self)
-    }
-}
-
-struct TextureResource {
-    id: TextureId,
-    path: &'static [u8],
-}
-
-const TEXTURE_LIST: &[TextureResource] = &[
-    TextureResource {
-        id: TextureId::Error,
-        path: include_bytes!("../assets/icons/error.svg"),
-    },
-    TextureResource {
-        id: TextureId::HomeIcon,
-        path: include_bytes!("../assets/icons/home_icon.svg"),
-    },
-    TextureResource {
-        id: TextureId::QuitIcon,
-        path: include_bytes!("../assets/icons/quit_icon.svg"),
-    },
-];
-
-const NUM_TEXTURES: usize = TEXTURE_LIST.len();
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub enum PageView {
@@ -114,26 +76,6 @@ pub enum PageView {
 impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx: &Context = &cc.egui_ctx;
-        egui_extras::install_image_loaders(ctx);
-
-        let mut textures: HashMap<TextureId, TextureHandle> =
-            HashMap::<TextureId, TextureHandle>::with_capacity(NUM_TEXTURES);
-
-        TEXTURE_LIST.iter().for_each(|texture| {
-            RustreamApp::add_texture_to_map(&mut textures, ctx, texture, None);
-        });
-
-        assert_eq!(
-            textures.len(),
-            NUM_TEXTURES,
-            r"Numbers of Textures Declared: {} | Actual number of textures: {},
-            Check:
-                1. If the texture is loaded correctly
-                2. If the texture name is unique
-                3. Try again and pray to the Rust gods",
-            NUM_TEXTURES,
-            textures.len()
-        );
 
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
@@ -143,7 +85,6 @@ impl RustreamApp {
             config,
             frame_grabber,
             video_recorder: None,
-            textures,
             sender: None,
             sender_rx: None,
             streaming_active: false,
@@ -172,7 +113,7 @@ impl RustreamApp {
             // captured_frame: None,
             is_address_valid: true,
             host_unreachable: Arc::new(AtomicBool::new(false)),
-            preview_stream: true,
+            is_preview_screen: true,
             end_of_stream: false,
             stream_ended: Arc::new(AtomicBool::new(false)),
             stopped_listening: false,
@@ -226,26 +167,29 @@ impl RustreamApp {
             }
 
             ui.vertical_centered(|ui| match self.page {
-                PageView::HomePage => ui
-                    .add(egui::Button::new(RichText::new("Home").size(32.0).color(Color32::ORANGE))
-                    .frame(false)
-                    .sense(egui::Sense::hover())),
-                PageView::Caster => ui
-                    .add(egui::Button::new(
+                PageView::HomePage => ui.add(
+                    egui::Button::new(RichText::new("Home").size(32.0).color(Color32::ORANGE))
+                        .frame(false)
+                        .sense(egui::Sense::hover()),
+                ),
+                PageView::Caster => ui.add(
+                    egui::Button::new(
                         RichText::new("Caster Mode")
                             .size(32.0)
                             .color(Color32::ORANGE),
                     )
                     .frame(false)
-                    .sense(egui::Sense::hover())),
-                PageView::Receiver => ui
-                    .add(egui::Button::new(
+                    .sense(egui::Sense::hover()),
+                ),
+                PageView::Receiver => ui.add(
+                    egui::Button::new(
                         RichText::new("Receiver Mode")
                             .size(32.0)
                             .color(Color32::ORANGE),
                     )
                     .frame(false)
-                    .sense(egui::Sense::hover())),
+                    .sense(egui::Sense::hover()),
+                ),
             });
         });
     }
@@ -644,36 +588,34 @@ impl RustreamApp {
                 ) {
                     self.streaming_active = !self.streaming_active;
 
-                    if !self.streaming_active { //stop button pressed
+                    if !self.streaming_active {
+                        //stop button pressed
                         self.stop_notify.notify_waiters(); //
                         self.captured_frames.lock().unwrap().clear();
                         self.end_of_stream = true;
                         self.stopped_listening = true;
-                    }
-                    else if self.stopped_listening { //start button pressed & stopped listening
+                    } else if self.stopped_listening {
+                        //start button pressed & stopped listening
                         self.stopped_listening = false;
-                        if let Some(sender) = self.sender.clone(){
-                            
+                        if let Some(sender) = self.sender.clone() {
                             tokio::spawn(async move {
                                 let mut sender = sender.lock().await;
                                 sender.started_sending = false; //restart the listen_for_receivers process
-        
                             });
                         }
-                        
                     }
                 }
 
                 if self.action_button(
                     ui,
-                    if self.preview_stream {
+                    if self.is_preview_screen {
                         "👁 Stop Preview Stream"
                     } else {
                         "👁 Preview Stream"
                     },
                     HotkeyAction::TogglePreview,
                 ) {
-                    self.preview_stream = !self.preview_stream;
+                    self.is_preview_screen = !self.is_preview_screen;
                 }
 
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
@@ -798,7 +740,7 @@ impl RustreamApp {
                     }
                 }
                 // Send the END_STREAM message if streaming is stopped
-                else if self.end_of_stream {    
+                else if self.end_of_stream {
                     self.end_stream();
                 }
 
@@ -810,7 +752,7 @@ impl RustreamApp {
 
                 // Update texture in memory
                 // TODO: possible code optimization to have only one time the default texture function loading
-                if self.preview_stream {
+                if self.is_preview_screen {
                     match self.display_texture {
                         Some(ref mut texture) => {
                             texture.set(image, egui::TextureOptions::default());
@@ -831,11 +773,9 @@ impl RustreamApp {
             }
 
             // Update texture in UI
-            let texture = self
-                .display_texture
-                .as_ref()
-                .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
-            ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+            if let Some(texture) = self.display_texture.as_ref() {
+                ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+            }
         });
     }
 
@@ -962,11 +902,8 @@ impl RustreamApp {
                 if self.stream_ended.load(Ordering::SeqCst) {
                     //ui.add_space(60.0);
                     ui.add_space(ui.available_size().y * 0.40);
-                    ui.label(
-                        RichText::new("End Of The Stream")
-                            .size(30.0),
-                    );
-      
+                    ui.label(RichText::new("End Of The Stream").size(30.0));
+
                     let mut frames = self.received_frames.lock().unwrap();
                     frames.clear();
                     self.display_texture = None;
@@ -1018,7 +955,7 @@ impl RustreamApp {
                                 receiver_clone,
                                 stop_notify,
                                 host_unreachable,
-                                stream_ended
+                                stream_ended,
                             )
                             .await;
                         }
@@ -1073,11 +1010,11 @@ impl RustreamApp {
                     ctx.request_repaint();
                 }
                 // Update texture in UI
-                let texture = self
-                    .display_texture
-                    .as_ref()
-                    .unwrap_or(self.textures.get(&TextureId::Error).unwrap());
-                ui.add(egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()));
+                if let Some(texture) = self.display_texture.as_ref() {
+                    ui.add(
+                        egui::Image::new(texture).max_size(self.get_preview_screen_rect(ui).size()),
+                    );
+                }
             });
         });
     }
@@ -1085,16 +1022,16 @@ impl RustreamApp {
     fn end_stream(&mut self) {
         if let Some(sender) = &self.sender {
             let sender_clone = sender.clone();
-            
+
             tokio::spawn(async move {
-            let sender = sender_clone.lock().await;
-            sender.end_stream().await;
+                let sender = sender_clone.lock().await;
+                sender.end_stream().await;
             });
 
             self.end_of_stream = false; //reset the flag
         }
     }
-    
+
     fn reset_receiving(&mut self) {
         self.stop_notify.notify_waiters();
         self.host_unreachable.store(false, Ordering::SeqCst);
@@ -1247,55 +1184,6 @@ impl RustreamApp {
                 error!("Unknown status in response");
             }
         }
-    }
-
-    /// Add a texture to the texture map
-    /// If the texture fails to load, an error texture is loaded instead
-    /// The error texture is a red square
-    /// The error texture is loaded only once and is reused for all errors
-    /// # Arguments
-    /// * `textures` - A mutable reference to the texture map
-    /// * `ctx` - A reference to the egui context
-    /// * `name` - The name of the texture
-    /// * `img_bytes` - The bytes of the image to load
-    /// * `texture_options` - Optional texture options
-    ///
-    /// # Panics
-    /// If the error texture is not found
-    ///
-    /// # Example
-    /// ```rust
-    /// let mut textures = HashMap<TextureId, TextureHandle>::new();
-    /// let ctx = egui::Context::new();
-    /// let img_bytes = include_bytes!("../assets/icons/home.svg");
-    /// add_texture_to_map(&mut textures, &ctx, TextureId::HomeIcon, img_bytes, None);
-    /// ```
-    fn add_texture_to_map(
-        textures: &mut HashMap<TextureId, TextureHandle>,
-        ctx: &Context,
-        resource: &TextureResource,
-        texture_options: Option<egui::TextureOptions>,
-    ) {
-        let image: ColorImage = match egui_extras::image::load_svg_bytes(resource.path) {
-            Ok(img) => img,
-            Err(e) => {
-                error!("Failed to load image: {}", e);
-                if let Some(error_texture) = textures.get(&TextureId::default()) {
-                    textures.insert(resource.id, error_texture.clone());
-                    return;
-                } else {
-                    error!("Default Texture not found.");
-                    ColorImage::new([50, 50], egui::Color32::RED)
-                }
-            }
-        };
-
-        let loaded_texture = ctx.load_texture(
-            resource.id.to_string(),
-            image,
-            texture_options.unwrap_or_default(),
-        );
-        textures.insert(resource.id, loaded_texture);
     }
 }
 

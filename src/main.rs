@@ -7,10 +7,10 @@ mod app;
 mod area_selection;
 mod common;
 mod config;
-mod sender;
-mod receiver;
 mod hotkey;
+mod receiver;
 mod screen_capture;
+mod sender;
 mod video_recorder;
 
 use app::RustreamApp;
@@ -26,12 +26,11 @@ const APP_TITLE: &str = "RUSTREAM";
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)
         .filter_module("egui_wgpu", LevelFilter::Off)
-        .filter_module("resvg", LevelFilter::Off)
         .init();
 
     let args: Vec<String> = env::args().collect();
