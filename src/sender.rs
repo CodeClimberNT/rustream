@@ -1,3 +1,4 @@
+use std::mem::size_of; // Add missing import
 use std::net::SocketAddr;
 use std::str::from_utf8;
 use std::sync::Arc;
@@ -52,7 +53,8 @@ impl Sender {
         let receivers = self.receivers.clone();
         let socket = self.socket.clone();
 
-        tokio::spawn(async move {  //implementare meccanismo per stoppare il loop 
+        tokio::spawn(async move {
+            //implementare meccanismo per stoppare il loop
             //atomicbool che metto a true quando instnazio il sender e a false in reset_ui
             loop {
                 let mut buf = [0; 1472];
@@ -104,13 +106,16 @@ impl Sender {
         });
     }
 
-    pub async fn send_data(&mut self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send_data(
+        &mut self,
+        frame: CapturedFrame,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let receivers = self.receivers.lock().await;
-        
+
         // Return early if no receivers
         if receivers.is_empty() {
             println!("No receivers connected");
-            return Ok(()); 
+            return Ok(());
         }
 
         let start = Instant::now();
@@ -136,15 +141,15 @@ impl Sender {
         //let mut set = JoinSet::new();
 
         for &peer in receivers.iter() {
-        
             let socket = self.socket.clone();
             let encoded_frame1 = encoded_frame.clone();
-            
-            tokio::spawn( async move {
+
+            tokio::spawn(async move {
                 let mut seq_num: u16 = 0;
 
-                for chunk in &mut encoded_frame1.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
-                
+                for chunk in
+                    &mut encoded_frame1.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE)
+                {
                     let mut pkt = Vec::new();
                     pkt.extend_from_slice(&seq_num.to_ne_bytes()); //&seq_num.to_ne_bytes()
                     pkt.extend_from_slice(&total_chunks.to_ne_bytes());
@@ -155,7 +160,7 @@ impl Sender {
                         eprintln!("Error sending to {}: {}", peer, e);
                     }
                     println!("Sent chunk {:?} to peer {}", seq_num, peer);
-                    
+
                     /*if let Err(e) = self.socket.send_to(&pkt, peer).await {
                         eprintln!("Error sending to {}: {}", peer, e);
                     }
@@ -167,7 +172,6 @@ impl Sender {
                 }
             });
             //seq_num += 1;
-            
         }
 
         // Wait for all tasks to complete
@@ -185,8 +189,8 @@ impl Sender {
 
         for &peer in receivers.iter() {
             let socket = self.socket.clone();
-            
-            tokio::spawn( async move {
+
+            tokio::spawn(async move {
                 let buf = "END_STREAM".as_bytes();
                 if let Err(e) = socket.send_to(&buf, peer).await {
                     eprintln!("Error sending END_STREAM to {}: {}", peer, e);
@@ -203,12 +207,11 @@ pub async fn start_streaming(
     frame: CapturedFrame,
     stop_notify: Arc<Notify>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    
     let mut sender = sender.lock().await;
-    
-    if !sender.started_sending {
+
+    if (!sender.started_sending) {
         sender.started_sending = true;
-        
+
         sender.listen_for_receivers(stop_notify).await;
     }
 

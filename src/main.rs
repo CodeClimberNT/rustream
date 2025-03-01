@@ -7,6 +7,7 @@ mod app;
 mod area_selection;
 mod common;
 mod config;
+mod ffmpeg_utils;
 mod hotkey;
 mod receiver;
 mod screen_capture;
@@ -26,7 +27,7 @@ const APP_TITLE: &str = "RUSTREAM";
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)

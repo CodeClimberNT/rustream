@@ -28,12 +28,12 @@
     ], default-features = false }
 
     # Screen Capture and Image Processing
+    ffmpeg-next = { version = "7.1.0" }
+
     scrap = "0.5.0"
     image = { version = "0.25.5", features = [
         "serde",
     ], default-features = false }
-    # ffmpeg-next = { version = "7.1.0" }
-
     # File System Utilities
     dirs = { version = "6.0.0", default-features = false }
 

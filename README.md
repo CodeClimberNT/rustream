@@ -34,3 +34,7 @@ multiple monitors independently, allowing users to cast content from any of the 
 displays. 
 
 
+## Installation
+LIBCLANG_PATH
+FFMPEG_DIR
+FFMPEG_INCLUDE_DIR

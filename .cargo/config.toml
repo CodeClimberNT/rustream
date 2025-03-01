@@ -1,13 +1,16 @@
-[alias]
-    br = "build --release"
-    bt = "build --timings"
-    brt = "build --release --timings"
-    rr = "run --release"
+# [alias]
+#     br = "build --release"
+#     bt = "build --timings"
+#     brt = "build --release --timings"
+#     rr = "run --release"
 
-[build]
-    jobs = -1
+# [build]
+#     jobs = -1
 
 [env]
+    # FFMPEG_DIR = { value = "libs/ffmpeg", relative = true }
+    # FFMPEG_INCLUDE_DIR = { value = "libs/ffmpeg/include", relative = true }
+    # LIBCLANG_PATH = { value = "libs/clang/lib", relative = true }
     # RUST_LOG = "info"
     # RUST_BACKTRACE = "true"
-    # RUST_BACKTRACE = "full"
+    RUST_BACKTRACE = "full"
