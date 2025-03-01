@@ -35,6 +35,33 @@ displays.
 
 
 ## Installation
-LIBCLANG_PATH
-FFMPEG_DIR
-FFMPEG_INCLUDE_DIR
+
+1. First clone the vcpkg 
+
+```bash
+git clone --depth=1 https://github.com/microsoft/vcpkg
+```
+
+2. install the ffmpeg libraries
+   
+```bash
+vcpkg install ffmpeg:x64-windows
+```
+
+3. (Optional) Integrate the installed library 
+
+```bash
+vcpkg integrate install
+```
+3. Add to the path the following:
+Inside `vcpkg/installedx64-windows` 
+
+There should be two folders:
+  - bin
+  - include 
+
+Add both folder to the system path
+
+(Not sure is needed) Additionally set two additional system variable with the previous added path
+- `FFMPEG_DIR` variable should be set with the path of the `bin` path from before
+- `FFMPEG_INCLUDE_DIR` variable should be set with the path of the `include` path from before
