@@ -188,7 +188,7 @@ impl ScreenCapture {
 
                         Err(e) => match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
-                                debug!("Frame not ready; skipping this frame.");
+                                //debug!("Frame not ready; skipping this frame.");
                             }
                             std::io::ErrorKind::ConnectionReset => {
                                 error!(

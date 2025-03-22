@@ -679,7 +679,7 @@ impl RustreamApp {
                             .unwrap();
                     }
                     None => {
-                        debug!("No capture area selected");
+                        //debug!("No capture area selected");
                     }
                 }
 
@@ -829,17 +829,40 @@ impl RustreamApp {
                             frames.clear();
                             drop(frames);
 
+                            /*let rcv_frames = self.received_frames.clone();
+                            let stop_notify = self.stop_notify.clone();
+                            let host_unreachable = self.host_unreachable.clone();
+                            let stream_ended = self.stream_ended.clone();*/
+
                             let (tx, rx) = channel();
+                            let mut host_unreachable = self.host_unreachable.clone();
 
                             // Initialize receiver
                             tokio::spawn(async move {
-                                let receiver = Receiver::new(caster_addr).await;
-                                let _ = tx.send(receiver);
+                                match Receiver::new(caster_addr).await {
+                                    Ok(receiver) => {
+                                        let _ = tx.send(receiver);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error initializing receiver: {}", e);
+                                        host_unreachable.store(true, Ordering::SeqCst);
+                                    }
+                                }
+
+                                /*start_receiving(
+                                    rcv_frames,
+                                    receiver, stop_notify,
+                                    host_unreachable, stream_ended,
+                                )
+                                .await;*/
+                                //let _ = tx.send(receiver);
                             });
+
 
                             //store rx to poll it later to see if initialization completed, since the channel sender is async
                             self.receiver_rx = Some(rx);
                             self.is_receiving = true;
+
                         } else {
                             self.is_address_valid = false;
                         }
@@ -886,6 +909,54 @@ impl RustreamApp {
                             }
                         });
                     });
+                    
+                    // Retrieve the latest frame from the queue
+                    /*let frame = {
+                        //in this way the lock is released immediately
+                        let mut frames = self.received_frames.lock().unwrap();
+                        frames.pop_front()
+                    };
+
+                    if let Some(frame) = frame {
+                        if let Some(video_recorder) = &mut self.video_recorder {
+                            if video_recorder.is_recording() {
+                                video_recorder.record_frame(&frame);
+                            }
+                        }
+
+                        // Convert to ColorImage for display
+                        let image = egui::ColorImage::from_rgba_unmultiplied(
+                            [frame.width, frame.height],
+                            &frame.rgba_data,
+                        );
+
+                        // Update texture in memory
+                        if let Some(ref mut texture) = self.display_texture {
+                            texture.set(image, egui::TextureOptions::default());
+                            //println!("texture updated");
+                        } else {
+                            self.display_texture = Some(ctx.load_texture(
+                                "display_texture",
+                                image,
+                                egui::TextureOptions::default(),
+                            ));
+                            //println!("texture loaded");
+                        }
+
+                        // Update FPS counter
+                        self.update_fps_counter();
+                    } else {
+                        // Add a loading indicator while waiting for receiver initialization
+                        if self.display_texture.is_none()
+                            && !self.host_unreachable.load(Ordering::SeqCst)
+                            && !self.stream_ended.load(Ordering::SeqCst)
+                        {
+                            ui.add_space(40.0);
+                            ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
+                            ui.label(RichText::new("Connecting to sender...").size(15.0));
+                        }
+                    }
+                    ctx.request_repaint();*/
                 }
 
                 // Show Host Unreachable message if the host is unreachable

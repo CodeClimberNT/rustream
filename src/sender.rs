@@ -1,13 +1,10 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::str::from_utf8;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{self, AsyncWriteExt, Interest};
 use std::sync::Arc;
-use std::thread::spawn;
 use std::time::Instant;
-use tokio::net::UdpSocket;
-use tokio::sync::{Mutex, Notify};
-use tokio::task::JoinSet;
-use tokio::time::sleep;
-use tokio::time::Duration;
+use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::screen_capture::CapturedFrame;
 
@@ -17,8 +14,8 @@ const SEQ_NUM_SIZE: usize = size_of::<u16>(); // Size of sequence number, 2
 const FRAME_ID_SIZE: usize = size_of::<u32>(); // Size of frame_id, 4
 
 pub struct Sender {
-    socket: Arc<UdpSocket>,
-    receivers: Arc<Mutex<Vec<SocketAddr>>>,
+    //socket: Arc<UdpSocket>,
+    receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
     frame_id: u32,
     pub started_sending: bool,
 }
@@ -26,22 +23,13 @@ pub struct Sender {
 impl Sender {
     //initialize caster UdpSocket
     pub async fn new() -> Self {
-        let addr = format!("0.0.0.0:{}", PORT);
+        /*let addr = format!("0.0.0.0:{}", PORT);
         let sock = UdpSocket::bind(addr).await.unwrap();
-        println!("Socket {} ", sock.local_addr().unwrap());
-        /*let sock = match sock {
-            Ok(socket) => socket,
-            Err(_) => {
-                println!("Failed to bind socket  to port 50000, binding to default port");
-                let default_sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-                println!("Socket bound to port {}",  default_sock.local_addr().unwrap().port()); //.to_string()?
-                default_sock
-            }
-            //sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-        };*/
+        println!("Socket {} ", sock.local_addr().unwrap());*/
+        
         Self {
-            socket: Arc::new(sock),
-            receivers: Arc::new(Mutex::new(Vec::new())),
+            //socket: Arc::new(sock),
+            receivers: Arc::new(RwLock::new(HashMap::new())),
             frame_id: 0,
             started_sending: false,
         }
@@ -50,12 +38,13 @@ impl Sender {
     // Start listening for new receivers in the background
     pub async fn listen_for_receivers(&self, stop_notify: Arc<Notify>) {
         let receivers = self.receivers.clone();
-        let socket = self.socket.clone();
+        //let socket = self.socket.clone();
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", PORT)).await.expect("Failed to bind TCP socket");
+        println!("TCP Server listening on port {}", PORT);
 
         tokio::spawn(async move {  //implementare meccanismo per stoppare il loop 
             //atomicbool che metto a true quando instnazio il sender e a false in reset_ui
             loop {
-                let mut buf = [0; 1472];
 
                 tokio::select! {
                     _ = stop_notify.notified() => {
@@ -63,12 +52,17 @@ impl Sender {
                         break;
                     },
 
-                    result = socket.recv_from(&mut buf) => {
-                        match result {
+                    //result = socket.recv_from(&mut buf) => {
+                    Ok((socket, peer_addr)) = listener.accept() => {
+                        //match result {
+                        receivers.write().await.insert(peer_addr, Arc::new(socket));
+                        //receivers.push(socket);
+                        println!("New receiver connected: {}", peer_addr);
+
 
                             //recv_from to receive from different clients
-                            Ok((_, peer_addr)) => {
-                                if let Ok(message) = from_utf8(&buf) {
+                            //Ok((_, peer_addr)) => {
+                                /*if let Ok(message) = from_utf8(&buf) {
                                     if message.trim_matches('\0') == "REQ_FRAMES" {
                                         println!("Received connection request from: {}", &peer_addr);
                                         let mut receivers = receivers.lock().await;
@@ -84,10 +78,10 @@ impl Sender {
                                             println!("Receiver {} disconnected", peer_addr);
                                         }
                                     }
-                                }
-                            }
+                                }*/
+                            //}
 
-                            Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                            /*Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
                                 eprintln!("Connection reset by peer: {}", e);
                                 // Handle connection reset, possibly retry connection
                                 /*let buffer = "TRY_RECONNECTION".as_bytes();
@@ -96,8 +90,8 @@ impl Sender {
                                 eprintln!("Failed to reconnect to receiver");
                                 }*/
                             }
-                            Err(e) => eprintln!("Error receiving connection: {}", e),
-                        }
+                            Err(e) => eprintln!("Error receiving connection: {}", e),*/
+                        //}
                     }
                 }
             }
@@ -105,7 +99,8 @@ impl Sender {
     }
 
     pub async fn send_data(&mut self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
-        let receivers = self.receivers.lock().await;
+        let recv = self.receivers.clone();
+        let receivers = self.receivers.read().await;
         
         // Return early if no receivers
         if receivers.is_empty() {
@@ -123,25 +118,90 @@ impl Sender {
         self.frame_id += 1;
         let fid = self.frame_id;
         println!("Frame id: {:?}", fid);
-
-        //let mut seq_num: u16; //  = 0 se for chunk for peer
-        //encoded_frame size = num elements (len()) * size of element (u8)[1 byte]
-        let total_chunks = (encoded_frame.len() as f32
-            / (MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) as f32)
-            .ceil() as u16;
-        println!("Total chunks: {:?}", total_chunks);
-
-        //let mut tasks = Vec::new();
-        let encoded_frame = Arc::new(encoded_frame);
-        //let mut set = JoinSet::new();
-
-        for &peer in receivers.iter() {
+        drop(receivers);
         
-            let socket = self.socket.clone();
+        let disconnected_peers = Arc::new(Mutex::new(Vec::new()));
+        
+        //for &peer in receivers.iter() {
+        let recv = recv.read().await;
+        for (_, stream) in recv.iter() {
+            
+            let disc_peers = disconnected_peers.clone();
             let encoded_frame1 = encoded_frame.clone();
+            let stream1 = stream.clone();
             
             tokio::spawn( async move {
-                let mut seq_num: u16 = 0;
+                
+                loop{
+                    //let mut stream = stream1.lock().await;
+                    let ready = stream1.ready(Interest::WRITABLE).await.unwrap();
+
+                    if ready.is_writable() {
+                        // Try to write data, this may still fail with `WouldBlock`
+                        // if the readiness event is a false positive.
+                        let frame_size = (encoded_frame1.len() as u32).to_ne_bytes();
+                        let mut pkt = Vec::new();
+                        pkt.extend_from_slice(&frame_size);
+                        pkt.extend_from_slice(&encoded_frame1); 
+                        
+                        /*if let Err(e) = stream.write_all(&encoded_frame).await {
+                            match e.kind() {
+                                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset => {
+                                    eprintln!("Connection closed by receiver.");
+                                }
+                                _ => {
+                                    eprintln!("Failed to send frame data: {:?}", e);
+                                }
+                            }
+                            return Err(e);
+                        }*/
+
+                        match stream1.try_write(&pkt) {
+                            
+                            Ok(0) => {
+                                // If 0 bytes are written, the connection was likely closed.
+                                eprintln!("Connection closed by peer");
+
+                                //Add peer to disconnected_peers
+                                let mut disconnected_peers = disc_peers.lock().await;
+                                disconnected_peers.push(stream1.peer_addr().unwrap());
+                                return;
+                            }
+                            Ok(_) => {
+                                println!("Sent frame {}", fid);
+                                break;
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                // If the readiness event is a false positive, try again
+                                continue;
+                                
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe 
+                                || e.kind() == io::ErrorKind::ConnectionReset
+                                || e.kind() == io::ErrorKind::ConnectionAborted => {
+                                // Connection was closed by the peer
+                                eprintln!("Connection closed: {:?}", e);
+
+                                //Add peer to disconnected_peers
+                                let mut disconnected_peers = disc_peers.lock().await;
+                                disconnected_peers.push(stream1.peer_addr().unwrap());
+                                return;
+                            }
+                            Err(e) => {
+                                // Handle other errors
+                                eprintln!("Failed to write to socket: {:?}", e);
+                                return;
+                            }
+                        }
+                    }
+                }
+                /*if stream1.write_all(&encoded_frame1).await.is_err(){
+                    eprintln!("Error sending frame to receiver");
+                    //disconnected_peers.push(stream.peer_addr().unwrap());
+
+                }*/ //
+
+                /*let mut seq_num: u16 = 0;
 
                 for chunk in &mut encoded_frame1.chunks(MAX_DATAGRAM_SIZE - 2 * SEQ_NUM_SIZE - FRAME_ID_SIZE) {
                 
@@ -160,30 +220,39 @@ impl Sender {
                         eprintln!("Error sending to {}: {}", peer, e);
                     }
                     println!("Sent chunk {:?} to peer {}", seq_num, peer);*/
-                    // Small delay to avoid flooding the network
-                    //sleep(Duration::from_micros(600)).await;
+                    
                     seq_num += 1;
-                    //tokio::time::sleep(Duration::from_micros(100)).await; //sleep for 100 microseconds before sending next chunk
-                }
-            });
-            //seq_num += 1;
-            
+                }*/
+            }); 
         }
+        
+        // Remove disconnected peers
+        let disconnected_peers = disconnected_peers.lock().await;
 
-        // Wait for all tasks to complete
-        /*while let Some(res) = set.join_next().await {
-            if let Err(e) = res {
-                eprintln!("Task failed: {:?}", e);
-            }
+        if !disconnected_peers.is_empty() {
+            let mut receivers = self.receivers.write().await;
+            
+            receivers.retain(|peer, _| {
+                let keep_peer = !disconnected_peers.contains(peer);  //check if actual peer is in disconnected_peers
+                if !keep_peer {
+                    println!("Receiver {} disconnected", peer);
+                }
+                keep_peer   //condition to keep or remove the peer in the receivers list
+            });
+        }
+        
+        /*for peer in disconnected_peers.iter() {
+            receivers.remove(peer);  //the Drop trait for TcpStream will close the connection
+            println!("Receiver {} disconnected", peer);
         }*/
         Ok(())
     }
 
     // Send end of stream messageto all receivers
     pub async fn end_stream(&self) {
-        let mut receivers = self.receivers.lock().await;
+        let mut receivers = self.receivers.write().await;
 
-        for &peer in receivers.iter() {
+        /*for &peer in receivers.iter() {
             let socket = self.socket.clone();
             
             tokio::spawn( async move {
@@ -193,8 +262,8 @@ impl Sender {
                 }
                 println!("Sent END_STREAM to peer {}", peer);
             });
-        }
-        //receivers.clear();
+        }*/
+        receivers.clear();
     }
 }
 

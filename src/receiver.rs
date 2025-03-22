@@ -1,33 +1,47 @@
 use std::collections::VecDeque;
-use std::io::ErrorKind::{self, ConnectionReset, WouldBlock};
+//use std::io::ErrorKind::{ConnectionReset, WouldBlock};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::str::from_utf8;
 use tokio::sync::{mpsc, Mutex, Notify};
-use tokio::time::{interval, Duration};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::net::UdpSocket;
+use tokio::net::TcpStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::screen_capture::CapturedFrame;
 
 pub struct Receiver {
-    pub socket: UdpSocket, //Arc<UdpSocket>
+    pub socket: TcpStream, //UdpSocket
     pub started_receiving: bool,
     caster: SocketAddr,
 }
 
 impl Receiver {
     //create a new receiver, its socket and connect to the caster
-    pub async fn new(caster: SocketAddr) -> Self {
+    pub async fn new(caster: SocketAddr) -> Result<Self, std::io::Error> {
         //Result<Self, std::io::Error>
-        let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-        println!("Socket {} ", sock.local_addr().unwrap());
-        let buf = "REQ_FRAMES".as_bytes();
         
-        if let Ok(_) = sock.connect(caster).await {
+        match TcpStream::connect(caster).await {
+            Ok(stream) => {
+                println!("Connected to sender at {}", caster);
+
+                Ok(Self {
+                    socket: stream,
+                    started_receiving: false,
+                    caster: caster,
+                })
+            }
+            Err(e) => {
+                eprintln!("Failed to connect to sender: {}", e);
+                Err(e)
+            }
+        }
+        
+        
+        
+        /*if let Ok(_) = sock.connect(caster).await {
             //connects socket to send/receive only from sender_addr
             match sock.send(buf).await {
                 //send datagram to caster to request the streaming
@@ -43,13 +57,13 @@ impl Receiver {
                     //return Err(e);
                 }
             }
-        }
+        }*/
 
-        Self {
+        /*Self {
             socket: sock, //Arc::new(sock),
             started_receiving: false,
             caster: caster,
-        }
+        }*/
     }
 
     //try reconnection to the sender
@@ -81,16 +95,16 @@ impl Receiver {
 
     pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>, stream_ended: Arc<AtomicBool> ) -> Result<(), std::io::Error> {
         //let mut buf =  vec![0; MAX_DATAGRAM_SIZE]; //[0; 1024]; //aggiustare dimesione buffer, troppo piccola per datagramma
-        let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
+        /*let mut frame_chunks: Vec<(u16, Vec<u8>)> = Vec::new();
         let mut frame: Vec<u8> = Vec::new();
         let mut fid: u32 = 1;
-        let mut received_chunks = std::collections::HashSet::new();
+        let mut received_chunks = std::collections::HashSet::new();*/
 
-        const MAX_DATAGRAM_SIZE: usize = 65507;
+        //const MAX_DATAGRAM_SIZE: usize = 65536;
 
         loop {
             
-            let mut buf = vec![0; MAX_DATAGRAM_SIZE];
+            let mut buf = vec![0u8; 4]; // Buffer to read frame size
             
 
             tokio::select! {
@@ -98,8 +112,47 @@ impl Receiver {
                     println!("Received stop signal, exiting recv_data");
                     break; // Gracefully exit when `notify_waiters()` is called
                 }
+                result = self.socket.read_exact(&mut buf) => {
+                    match result {
+                        Ok(0) => {
+                            println!("Connection closed by sender");
+                            stream_ended.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                        Ok(_) => {
+                            let frame_size = u32::from_ne_bytes(buf.try_into().unwrap());
+                            let mut frame = vec![0u8; frame_size as usize];
+                            println!("Frame size: {:?}", frame_size);
 
-                res = self.socket.recv_from(&mut buf) => { // Keep listening for UDP packets
+                            // Read the complete frame
+                            match self.socket.read_exact(&mut frame).await {
+                                Ok(0) => {
+                                    println!("Connection closed by sender");
+                                    stream_ended.store(true, Ordering::SeqCst);
+                                    break;
+                                }
+                                Ok(_) => {
+                                    println!("Frame received");
+                                    if let Err(e) = tx.send(frame).await {
+                                        eprintln!("Error sending encoded frame to start_receiving: {}", e);
+                                    }
+
+                                }
+                                Err(e) => {
+                                    eprintln!("Error receiving frame: {}", e);
+                                    return Err(e);
+                                }
+                            }
+                            
+                        }
+                        Err(e) => {
+                            eprintln!("Error receiving frame size: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+
+                /*res = self.socket.recv_from(&mut buf) => { // Keep listening for UDP packets
                     match res {
                         Ok((len, _)) => {
 
@@ -179,13 +232,13 @@ impl Receiver {
                             return Err(e);
                         }
                     }
-                }
+                }*/
             }
         }
         Ok(()) //when not receiving return
     }
 
-    pub fn stop_receiving(&self) {
+    /*pub fn stop_receiving(&self) {
         let buf = "CLOSE_CONNECTION".as_bytes();
         match self.socket.try_send(buf) {
             Ok(_) => {
@@ -193,14 +246,14 @@ impl Receiver {
             }
             Err(_) => println!("Failed to close connection"),
         }
-    }
+    }*/
 }
 
-impl Drop for Receiver {
+/*impl Drop for Receiver {
     fn drop(&mut self) {
-        self.stop_receiving();
+        self.stop_receiving();    
     }
-}
+}*/
 
 async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {  // mut rx: mpsc::Receiver<Vec<u8>>       
    
@@ -251,6 +304,9 @@ pub async fn start_receiving(
                 }
             }*/
         }
+        /*else {
+            drop(receiver);  //drop receiver to stop receiving correctly
+        }*/ 
         drop(recv);           
     });
         
@@ -266,7 +322,7 @@ pub async fn start_receiving(
             Some(frame) = rx.recv() => {
                 
                 tokio::spawn(async move {
-                    //println!("Calling process_frame");
+                    println!("Calling process_frame");
                     process_frame(frames_vec1, frame).await;
                     // frames_vec is the vector of frames to share with ui                    
                 }); 
@@ -318,18 +374,13 @@ fn decode_from_h265_to_rgba(
             //"-y",  // Overwrite output files
             //gpu_acceleration[0], gpu_acceleration[1],
             //decoder[0], decoder[1],
-            "-f",
-            "hevc", // input format is H.265
-            "-i",
-            "pipe:0", // input from stdin
-            "-c:v",
-            "rawvideo",
-            "-preset",
-            "ultrafast",
-            "-pix_fmt",
-            "rgba", // convert to rgba
-            "-f",
-            "rawvideo", // output raw
+            //"-c:v", "hevc", 
+            "-f", "hevc", // input format is H.265
+            "-i", "pipe:0", // input from stdin
+            "-c:v", "rawvideo",
+            "-preset", "ultrafast",
+            "-pix_fmt", "rgba", // convert to rgba
+            "-f", "rawvideo", // output raw
             //"-video_size", &format!("{}x{}", width, height),
             "pipe:1", // output to stdout
         ])

@@ -193,21 +193,14 @@ impl CapturedFrame {
         let mut ffmpeg = command
             .args([
                 //gpu_acceleration[0], gpu_acceleration[1],
-                "-f",
-                "rawvideo", // input is raw video
-                "-pixel_format",
-                "rgba",
-                "-video_size",
-                &format!("{}x{}", self.width, self.height),
-                "-i",
-                "-", // input from stdin
-                "-c:v",
-                "libx265", // Codec H.265
+                "-f", "rawvideo", // input is raw video
+                "-pixel_format", "rgba",
+                "-video_size", &format!("{}x{}", self.width, self.height),
+                "-i", "-", // input from stdin
+                "-c:v", "hevc", // Codec H.265
                 //encoder[0], encoder[1],
-                "-preset",
-                "ultrafast",
-                "-f",
-                "rawvideo", // output raw
+                "-preset", "ultrafast",
+                "-f", "rawvideo", // output raw
                 "-",        // output to stdout
             ])
             .stdin(Stdio::piped())
