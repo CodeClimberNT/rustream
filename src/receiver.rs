@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 //use std::io::ErrorKind::{ConnectionReset, WouldBlock};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::str::from_utf8;
 use tokio::sync::{mpsc, Mutex, Notify};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::SocketAddr;
@@ -104,7 +105,7 @@ impl Receiver {
 
         loop {
             
-            let mut buf = vec![0u8; 4]; // Buffer to read frame size
+            let mut buf = vec![0; 4]; // Buffer to read frame size
             
 
             tokio::select! {
@@ -120,8 +121,17 @@ impl Receiver {
                             break;
                         }
                         Ok(_) => {
+                            // if received END message, return earlier
+                            if let Ok(message) = from_utf8(&buf) {
+                                if message.trim_matches('\0') == "END" {
+                                    println!("Received END message");
+                                    stream_ended.store(true, Ordering::SeqCst);
+                                    //return Ok(());
+                                    continue;
+                                }
+                            } 
                             let frame_size = u32::from_ne_bytes(buf.try_into().unwrap());
-                            let mut frame = vec![0u8; frame_size as usize];
+                            let mut frame = vec![0; frame_size as usize];
                             println!("Frame size: {:?}", frame_size);
 
                             // Read the complete frame

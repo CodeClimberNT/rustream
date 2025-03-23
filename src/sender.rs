@@ -250,19 +250,44 @@ impl Sender {
 
     // Send end of stream messageto all receivers
     pub async fn end_stream(&self) {
-        let mut receivers = self.receivers.write().await;
+        //let recv = self.receivers.clone();
+        let receivers = self.receivers.clone();
+        let receivers = receivers.read().await;
 
-        /*for &peer in receivers.iter() {
-            let socket = self.socket.clone();
+        for (peer, stream) in receivers.iter() {
+            let stream1 = stream.clone();
+            let peer1 = *peer;
             
             tokio::spawn( async move {
-                let buf = "END_STREAM".as_bytes();
-                if let Err(e) = socket.send_to(&buf, peer).await {
-                    eprintln!("Error sending END_STREAM to {}: {}", peer, e);
+                let mut buf = vec![0; 4];
+                let message = b"END";
+                buf[..message.len()].copy_from_slice(message); // Copy message to buffer, last byte is 0
+
+                loop {
+                    let ready = stream1.ready(Interest::WRITABLE).await.unwrap();
+
+                    if ready.is_writable() {
+                        match stream1.try_write(&buf) {
+                            
+                            Ok(_) => {
+                                println!("Sent END to peer {}", peer1);
+                                break;
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                // If the readiness event is a false positive, try again
+                                continue;
+                            }
+                            Err(e) => {
+                                // Handle other errors
+                                eprintln!("Error sending END to {}: {}", peer1, e);
+                                return;
+                            }
+                        }
+                    }
                 }
-                println!("Sent END_STREAM to peer {}", peer);
             });
-        }*/
+        }
+        let mut receivers = self.receivers.write().await;
         receivers.clear();
     }
 }
