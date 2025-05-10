@@ -5,6 +5,8 @@ use tokio::io::{self, AsyncWriteExt, Interest};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+
 
 use crate::screen_capture::CapturedFrame;
 
@@ -16,6 +18,7 @@ const FRAME_ID_SIZE: usize = size_of::<u32>(); // Size of frame_id, 4
 pub struct Sender {
     //socket: Arc<UdpSocket>,
     receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
+    disconnected_peers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: u32,
     pub started_sending: bool,
 }
@@ -26,10 +29,11 @@ impl Sender {
         /*let addr = format!("0.0.0.0:{}", PORT);
         let sock = UdpSocket::bind(addr).await.unwrap();
         println!("Socket {} ", sock.local_addr().unwrap());*/
-        
+
         Self {
             //socket: Arc::new(sock),
             receivers: Arc::new(RwLock::new(HashMap::new())),
+            disconnected_peers: Arc::new(Mutex::new(Vec::new())),
             frame_id: 0,
             started_sending: false,
         }
@@ -100,8 +104,23 @@ impl Sender {
 
     pub async fn send_data(&mut self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
         let recv = self.receivers.clone();
-        let receivers = self.receivers.read().await;
         
+
+        let mut disconnected_peers = self.disconnected_peers.lock().await;
+
+        //Remove disconnected peers before sending data
+        if !disconnected_peers.is_empty() {
+            
+            for peer in disconnected_peers.iter() {
+                self.receivers.write().await.remove(peer);  //the Drop trait for TcpStream will close the connection
+                println!("Receiver {} disconnected", peer);
+            }
+            disconnected_peers.clear(); // Clear the disconnected peers after processing
+        }
+        drop(disconnected_peers);
+
+        let receivers = self.receivers.read().await;
+
         // Return early if no receivers
         if receivers.is_empty() {
             println!("No receivers connected");
@@ -120,15 +139,16 @@ impl Sender {
         println!("Frame id: {:?}", fid);
         drop(receivers);
         
-        let disconnected_peers = Arc::new(Mutex::new(Vec::new()));
         
         //for &peer in receivers.iter() {
         let recv = recv.read().await;
-        for (_, stream) in recv.iter() {
+
+        for (peer_addr, stream) in recv.iter() {
             
-            let disc_peers = disconnected_peers.clone();
+            let disc_peers = self.disconnected_peers.clone();
             let encoded_frame1 = encoded_frame.clone();
             let stream1 = stream.clone();
+            let peer_addr = *peer_addr;
             
             tokio::spawn( async move {
                 
@@ -164,7 +184,9 @@ impl Sender {
 
                                 //Add peer to disconnected_peers
                                 let mut disconnected_peers = disc_peers.lock().await;
-                                disconnected_peers.push(stream1.peer_addr().unwrap());
+                                disconnected_peers.push(peer_addr);  //stream1.peer_addr().unwrap()
+                                println!("Peer added to disconnected_peers: {}", peer_addr);
+                                drop(disconnected_peers);
                                 return;
                             }
                             Ok(_) => {
@@ -184,7 +206,9 @@ impl Sender {
 
                                 //Add peer to disconnected_peers
                                 let mut disconnected_peers = disc_peers.lock().await;
-                                disconnected_peers.push(stream1.peer_addr().unwrap());
+                                disconnected_peers.push(peer_addr);  //stream1.peer_addr().unwrap()
+                                println!("Peer added to disconnected_peers: {}", peer_addr);
+                                drop(disconnected_peers);
                                 return;
                             }
                             Err(e) => {
@@ -225,26 +249,7 @@ impl Sender {
                 }*/
             }); 
         }
-        
-        // Remove disconnected peers
-        let disconnected_peers = disconnected_peers.lock().await;
-
-        if !disconnected_peers.is_empty() {
-            let mut receivers = self.receivers.write().await;
-            
-            receivers.retain(|peer, _| {
-                let keep_peer = !disconnected_peers.contains(peer);  //check if actual peer is in disconnected_peers
-                if !keep_peer {
-                    println!("Receiver {} disconnected", peer);
-                }
-                keep_peer   //condition to keep or remove the peer in the receivers list
-            });
-        }
-        
-        /*for peer in disconnected_peers.iter() {
-            receivers.remove(peer);  //the Drop trait for TcpStream will close the connection
-            println!("Receiver {} disconnected", peer);
-        }*/
+    
         Ok(())
     }
 
@@ -299,10 +304,11 @@ pub async fn start_streaming(
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     let mut sender = sender.lock().await;
+
     
     if !sender.started_sending {
         sender.started_sending = true;
-        
+
         sender.listen_for_receivers(stop_notify).await;
     }
 

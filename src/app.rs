@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot::{channel, error::TryRecvError};
 use tokio::sync::Notify;
+use tokio::sync::mpsc::unbounded_channel;
 // use std::time::Duration;
 
 use eframe::egui;
@@ -684,12 +685,14 @@ impl RustreamApp {
                 }
 
                 if self.streaming_active {
+
                     // Initialize sender if it doesn't exist
                     if self.sender.is_none() && !self.socket_created {
                         let (tx, rx) = channel();
                         self.socket_created = true;
-
+                        
                         tokio::spawn(async move {
+
                             let sender = Sender::new().await;
                             let _ = tx.send(Arc::new(tokio::sync::Mutex::new(sender)));
                         });
