@@ -27,7 +27,7 @@ const APP_TITLE: &str = "RUSTREAM";
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
         .filter_module("eframe", LevelFilter::Off)
         .filter_module("wgpu", LevelFilter::Off)
         .filter_module("naga", LevelFilter::Off)
@@ -110,7 +110,7 @@ async fn main() {
                 eframe::run_native(
                     "Select Area",
                     overlay_options,
-                    Box::new(|_cc| Ok(Box::new(AreaCaptureApp::default()))),
+                    Box::new(|_| Ok(Box::new(AreaCaptureApp::default()))),
                 )
                 .expect("Failed to run Resize Screen");
             }
@@ -118,7 +118,7 @@ async fn main() {
                 eframe::run_native(
                     "Annotation",
                     overlay_options,
-                    Box::new(|_cc| Ok(Box::new(annotation::AnnotationApp::default()))),
+                    Box::new(|_| Ok(Box::new(annotation::AnnotationApp::default()))),
                 )
                 .expect("Failed to run Resize Screen");
             }
@@ -132,7 +132,7 @@ async fn main() {
     eframe::run_native(
         APP_TITLE,
         rustream_options,
-        Box::new(|cc: &eframe::CreationContext<'_>| Ok(Box::new(RustreamApp::new(cc)))),
+        Box::new(|_| Ok(Box::new(RustreamApp::new()))),
     )
     .expect("Failed to run RustreamApp");
 }

@@ -1,14 +1,11 @@
+use log::debug;
 use std::mem::size_of; // Add missing import
 use std::net::SocketAddr;
 use std::str::from_utf8;
 use std::sync::Arc;
-use std::thread::spawn;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify};
-use tokio::task::JoinSet;
-use tokio::time::sleep;
-use tokio::time::Duration;
 
 use crate::screen_capture::CapturedFrame;
 
@@ -110,6 +107,15 @@ impl Sender {
         &mut self,
         frame: CapturedFrame,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Assert that frame's rgba_data is not all zeroes
+        if frame.rgba_data.iter().all(|&x| x == 0) {
+            return Err("Frame data is all zeroes".into());
+        }
+
+        debug!(
+            "Sender frame sample (first 16 bytes): {:?}",
+            &frame.rgba_data[..16.min(frame.rgba_data.len())]
+        );
         let receivers = self.receivers.lock().await;
 
         // Return early if no receivers
@@ -185,14 +191,14 @@ impl Sender {
 
     // Send end of stream messageto all receivers
     pub async fn end_stream(&self) {
-        let mut receivers = self.receivers.lock().await;
+        let receivers = self.receivers.lock().await;
 
         for &peer in receivers.iter() {
             let socket = self.socket.clone();
 
             tokio::spawn(async move {
                 let buf = "END_STREAM".as_bytes();
-                if let Err(e) = socket.send_to(&buf, peer).await {
+                if let Err(e) = socket.send_to(buf, peer).await {
                     eprintln!("Error sending END_STREAM to {}: {}", peer, e);
                 }
                 println!("Sent END_STREAM to peer {}", peer);
@@ -209,7 +215,7 @@ pub async fn start_streaming(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sender = sender.lock().await;
 
-    if (!sender.started_sending) {
+    if !sender.started_sending {
         sender.started_sending = true;
 
         sender.listen_for_receivers(stop_notify).await;

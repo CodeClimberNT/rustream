@@ -8,9 +8,9 @@
 #     jobs = -1
 
 [env]
-    # FFMPEG_DIR = { value = "libs/ffmpeg", relative = true }
+    # FFMPEG_DIR = { value = "libs/ffmpeg/bin", relative = true }
     # FFMPEG_INCLUDE_DIR = { value = "libs/ffmpeg/include", relative = true }
     # LIBCLANG_PATH = { value = "libs/clang/lib", relative = true }
     # RUST_LOG = "info"
     # RUST_BACKTRACE = "true"
-    RUST_BACKTRACE = "full"
+    # RUST_BACKTRACE = "full"

@@ -45,16 +45,14 @@ git clone --depth=1 https://github.com/microsoft/vcpkg
 2. install the ffmpeg libraries
    
 ```bash
-vcpkg install ffmpeg:x64-windows
+vcpkg install ffmpeg[all-gpl]:x64-windows
 ```
+> [!Note]
+> Check this: https://vcpkg.link/ports/ffmpeg if other flag are required when the application evolve
 
-3. (Optional) Integrate the installed library 
 
-```bash
-vcpkg integrate install
-```
 3. Add to the path the following:
-Inside `vcpkg/installedx64-windows` 
+Inside `[...]/vcpkg/installed/x64-windows` 
 
 There should be two folders:
   - bin
@@ -63,5 +61,22 @@ There should be two folders:
 Add both folder to the system path
 
 (Not sure is needed) Additionally set two additional system variable with the previous added path
-- `FFMPEG_DIR` variable should be set with the path of the `bin` path from before
+- `FFMPEG_DIR` variable should be set with the `[...]/vcpkg/installed/x64-windows` path from before
+- `FFMPEG_LIB_DIR` variable should be set with the path of the `bin` path from before
 - `FFMPEG_INCLUDE_DIR` variable should be set with the path of the `include` path from before
+
+Also download the clang library to allow the linker to properly:
+
+It can be downloaded alongside the llvm here: https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8
+
+> [!Warning]
+> Newer version may be available, this is the link for the one used to link this project and worked, newer release should not break this step.
+
+Download the correct version for your os
+> e.g. for my windows installation i downloaded: `clang+llvm-18.1.8-x86_64-pc-windows-msvc.tar.xz`
+
+Extract the downloaded value and put the resulting folder in a known place (e.g. I renamed it and putted it in the root directory as `C:\clang`).
+
+At this point, as before, add the `LIBCLANG_PATH` system variable pointing to the bin folder
+
+> In my example it is `C:\clang\bin`

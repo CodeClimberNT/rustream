@@ -1,22 +1,19 @@
 use std::collections::VecDeque;
 use std::io::ErrorKind::{self, ConnectionReset, WouldBlock};
-use std::io::Write;
 use std::net::SocketAddr;
-use std::process::{Command, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, Mutex, Notify};
-use tokio::time::{interval, Duration};
 
 use crate::screen_capture::CapturedFrame;
 
 pub struct Receiver {
     pub socket: UdpSocket, //Arc<UdpSocket>
     pub started_receiving: bool,
-    caster: SocketAddr,
+    _caster: SocketAddr,
 }
 
 impl Receiver {
@@ -48,7 +45,7 @@ impl Receiver {
         Self {
             socket: sock,
             started_receiving: false,
-            caster,
+            _caster: caster,
         }
     }
 
@@ -258,5 +255,3 @@ fn decode_from_h265_to_rgba(
     let (rgba_data, width, height) = crate::ffmpeg_utils::decode_from_h265(&frame_data)?;
     Ok(CapturedFrame::from_rgba_vec(rgba_data, width, height))
 }
-
-

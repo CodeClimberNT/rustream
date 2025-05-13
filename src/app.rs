@@ -5,7 +5,6 @@ use crate::receiver::{start_receiving, Receiver};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::sender::{start_streaming, Sender, PORT};
 use crate::video_recorder::VideoRecorder;
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot::{channel, error::TryRecvError};
 use tokio::sync::Notify;
-// use std::time::Duration;
 
 use eframe::egui;
 use egui::{
@@ -74,9 +72,7 @@ pub enum PageView {
 }
 
 impl RustreamApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let ctx: &Context = &cc.egui_ctx;
-
+    pub fn new() -> Self {
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
         //let video_recorder = VideoRecorder::new(config.clone());
