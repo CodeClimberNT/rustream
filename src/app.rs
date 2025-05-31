@@ -11,9 +11,9 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot::{channel, error::TryRecvError};
 use tokio::sync::Notify;
-use tokio::sync::mpsc::unbounded_channel;
 // use std::time::Duration;
 
 use eframe::egui;
@@ -685,14 +685,12 @@ impl RustreamApp {
                 }
 
                 if self.streaming_active {
-
                     // Initialize sender if it doesn't exist
                     if self.sender.is_none() && !self.socket_created {
                         let (tx, rx) = channel();
                         self.socket_created = true;
-                        
-                        tokio::spawn(async move {
 
+                        tokio::spawn(async move {
                             let sender = Sender::new().await;
                             let _ = tx.send(Arc::new(tokio::sync::Mutex::new(sender)));
                         });
@@ -745,6 +743,9 @@ impl RustreamApp {
                 // Send the END_STREAM message if streaming is stopped
                 else if self.end_of_stream {
                     self.end_stream();
+                    self.sender = None;
+                    self.sender_rx = None;
+                    self.socket_created = false;
                 }
 
                 // Convert to ColorImage for display
@@ -861,11 +862,9 @@ impl RustreamApp {
                                 //let _ = tx.send(receiver);
                             });
 
-
                             //store rx to poll it later to see if initialization completed, since the channel sender is async
                             self.receiver_rx = Some(rx);
                             self.is_receiving = true;
-
                         } else {
                             self.is_address_valid = false;
                         }
@@ -912,7 +911,7 @@ impl RustreamApp {
                             }
                         });
                     });
-                    
+
                     // Retrieve the latest frame from the queue
                     /*let frame = {
                         //in this way the lock is released immediately
