@@ -5,16 +5,13 @@ use crate::receiver::{start_receiving, Receiver};
 use crate::screen_capture::{CapturedFrame, ScreenCapture};
 use crate::sender::{start_streaming, Sender, PORT};
 use crate::video_recorder::VideoRecorder;
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot::{channel, error::TryRecvError};
 use tokio::sync::Notify;
-// use std::time::Duration;
 
 use eframe::egui;
 use egui::{
@@ -41,7 +38,6 @@ pub struct RustreamApp {
     caster_addr: Option<SocketAddr>, // Socket Address defined by user in receiver mode
     streaming_active: bool,
     is_selecting: bool,
-    // captured_frame: Option<CapturedFrame>,
     capture_area: Option<CaptureArea>,
     show_config: bool, // Show config window
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
@@ -63,7 +59,6 @@ pub struct RustreamApp {
     is_preview_screen: bool,
     end_of_stream: bool, // Flag to signal the end of the stream in the sender
     stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
-    stopped_listening: bool,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -76,11 +71,9 @@ pub enum PageView {
 
 impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let ctx: &Context = &cc.egui_ctx;
 
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
-        //let video_recorder = VideoRecorder::new(config.clone());
 
         RustreamApp {
             config,
@@ -111,19 +104,16 @@ impl RustreamApp {
             triggered_actions: Vec::new(),
             previous_monitor: 0,
             caster_addr: None,
-            // captured_frame: None,
             is_address_valid: true,
             host_unreachable: Arc::new(AtomicBool::new(false)),
             is_preview_screen: true,
             end_of_stream: false,
             stream_ended: Arc::new(AtomicBool::new(false)),
-            stopped_listening: false,
         }
     }
-
+    
+    // Get the available space for the preview screen
     fn get_preview_screen_rect(&self, ui: &egui::Ui) -> Rect {
-        // Adjust this based on how your preview is laid out
-        // For example, occupy the full available space
         ui.available_rect_before_wrap()
     }
 
@@ -142,10 +132,10 @@ impl RustreamApp {
             let mut frames = self.captured_frames.lock().unwrap();
             frames.clear();
             drop(frames);
-            // self.captured_frame = None;
             self.display_texture = None;
             self.capture_area = None;
             self.video_recorder = None; //dropping video recorder, the video is saved
+        
         } else if self.page == PageView::Receiver {
             //if we are exiting from receiver mode
             self.reset_receiving();
@@ -591,20 +581,10 @@ impl RustreamApp {
 
                     if !self.streaming_active {
                         //stop button pressed
-                        self.stop_notify.notify_waiters(); //
+                        self.stop_notify.notify_waiters();
                         self.captured_frames.lock().unwrap().clear();
                         self.end_of_stream = true;
-                        self.stopped_listening = true;
-                    } else if self.stopped_listening {
-                        //start button pressed & stopped listening
-                        self.stopped_listening = false;
-                        if let Some(sender) = self.sender.clone() {
-                            tokio::spawn(async move {
-                                let mut sender = sender.lock().await;
-                                sender.started_sending = false; //restart the listen_for_receivers process
-                            });
-                        }
-                    }
+                     }
                 }
 
                 if self.action_button(
@@ -660,10 +640,10 @@ impl RustreamApp {
 
             let mut frames = self.captured_frames.lock().unwrap();
             if let Some(mut display_frame) = frames.pop_front() {
-                //front().cloned()
+                
                 if frames.len() >= 7 {
                     println!("Captured_Frames len: {}, dropping frames", frames.len());
-                    frames.clear() //truncate(3); //only leave 3 elements
+                    frames.clear();
                 }
 
                 drop(frames);
@@ -714,23 +694,10 @@ impl RustreamApp {
                     // Send frame if we have a sender
                     if let Some(sender) = &self.sender {
                         //i redo the check to extract the sender from Option<Sender>
-                        let sender_clone = sender.clone();
-                        //let mut frames = self.captured_frames.lock().unwrap();
-
-                        /*for frame in frames.drain(..) { // Take all frames for streaming
-                            let sender = sender.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = start_streaming(sender, frame).await {
-                                    eprintln!("Error sending frame: {}", e);
-                                }
-                            });
-                        }*/
-
-                        // Store the cropped frame if a capture area is selected
-
-                        // Send a cropped frame if we have one, otherwise send the full frame
+                        let sender_clone = sender.clone();                                                    
                         let clone_frame = display_frame.clone();
                         let stop_notify = self.stop_notify.clone();
+
                         tokio::spawn(async move {
                             if let Err(e) =
                                 start_streaming(sender_clone, clone_frame, stop_notify).await
@@ -740,7 +707,7 @@ impl RustreamApp {
                         });
                     }
                 }
-                // Send the END_STREAM message if streaming is stopped
+                // Send the END_STREAM message and clear sender if streaming is stopped
                 else if self.end_of_stream {
                     self.end_stream();
                     self.sender = None;
@@ -754,8 +721,7 @@ impl RustreamApp {
                     &display_frame.rgba_data,
                 );
 
-                // Update texture in memory
-                // TODO: possible code optimization to have only one time the default texture function loading
+                // Update texture in memory           
                 if self.is_preview_screen {
                     match self.display_texture {
                         Some(ref mut texture) => {
@@ -772,8 +738,6 @@ impl RustreamApp {
                 } else {
                     self.display_texture = None;
                 }
-
-                //ctx.request_repaint();
             }
 
             // Update texture in UI
@@ -831,15 +795,10 @@ impl RustreamApp {
                             //clear the previous frame queue to prevent frames from previous streaming from being displayed
                             let mut frames = self.received_frames.lock().unwrap();
                             frames.clear();
-                            drop(frames);
-
-                            /*let rcv_frames = self.received_frames.clone();
-                            let stop_notify = self.stop_notify.clone();
-                            let host_unreachable = self.host_unreachable.clone();
-                            let stream_ended = self.stream_ended.clone();*/
+                            drop(frames);                    
 
                             let (tx, rx) = channel();
-                            let mut host_unreachable = self.host_unreachable.clone();
+                            let host_unreachable = self.host_unreachable.clone();
 
                             // Initialize receiver
                             tokio::spawn(async move {
@@ -851,20 +810,13 @@ impl RustreamApp {
                                         eprintln!("Error initializing receiver: {}", e);
                                         host_unreachable.store(true, Ordering::SeqCst);
                                     }
-                                }
-
-                                /*start_receiving(
-                                    rcv_frames,
-                                    receiver, stop_notify,
-                                    host_unreachable, stream_ended,
-                                )
-                                .await;*/
-                                //let _ = tx.send(receiver);
+                                }                           
                             });
 
                             //store rx to poll it later to see if initialization completed, since the channel sender is async
                             self.receiver_rx = Some(rx);
                             self.is_receiving = true;
+
                         } else {
                             self.is_address_valid = false;
                         }
@@ -891,12 +843,13 @@ impl RustreamApp {
                             .fill(egui::Color32::from_rgb(200, 0, 0))
                             .min_size(egui::vec2(60.0, 30.0));
 
+                            //Stop button
                             if ui.add(stop_button).clicked() {
                                 self.reset_receiving();
                             }
                         });
 
-                        // Push "Start Recording" to the right
+                        // Start Recording button
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(10.0);
                             self.render_recording_controls(ui);
@@ -911,54 +864,6 @@ impl RustreamApp {
                             }
                         });
                     });
-
-                    // Retrieve the latest frame from the queue
-                    /*let frame = {
-                        //in this way the lock is released immediately
-                        let mut frames = self.received_frames.lock().unwrap();
-                        frames.pop_front()
-                    };
-
-                    if let Some(frame) = frame {
-                        if let Some(video_recorder) = &mut self.video_recorder {
-                            if video_recorder.is_recording() {
-                                video_recorder.record_frame(&frame);
-                            }
-                        }
-
-                        // Convert to ColorImage for display
-                        let image = egui::ColorImage::from_rgba_unmultiplied(
-                            [frame.width, frame.height],
-                            &frame.rgba_data,
-                        );
-
-                        // Update texture in memory
-                        if let Some(ref mut texture) = self.display_texture {
-                            texture.set(image, egui::TextureOptions::default());
-                            //println!("texture updated");
-                        } else {
-                            self.display_texture = Some(ctx.load_texture(
-                                "display_texture",
-                                image,
-                                egui::TextureOptions::default(),
-                            ));
-                            //println!("texture loaded");
-                        }
-
-                        // Update FPS counter
-                        self.update_fps_counter();
-                    } else {
-                        // Add a loading indicator while waiting for receiver initialization
-                        if self.display_texture.is_none()
-                            && !self.host_unreachable.load(Ordering::SeqCst)
-                            && !self.stream_ended.load(Ordering::SeqCst)
-                        {
-                            ui.add_space(40.0);
-                            ui.add_sized(egui::vec2(30.0, 30.0), egui::Spinner::new()); // Show a spinner while connecting
-                            ui.label(RichText::new("Connecting to sender...").size(15.0));
-                        }
-                    }
-                    ctx.request_repaint();*/
                 }
 
                 // Show Host Unreachable message if the host is unreachable
@@ -967,13 +872,13 @@ impl RustreamApp {
                     ui.label(
                         RichText::new("Host Unreachable")
                             .color(Color32::RED)
-                            .size(15.0),
+                            .size(20.0),
                     );
                 }
 
                 // Show Stream Ended message
                 if self.stream_ended.load(Ordering::SeqCst) {
-                    //ui.add_space(60.0);
+                    
                     ui.add_space(ui.available_size().y * 0.40);
                     ui.label(RichText::new("End Of The Stream").size(30.0));
 
@@ -984,7 +889,7 @@ impl RustreamApp {
 
                 // Check if we have a pending receiver initialization
                 if let Some(mut rx) = self.receiver_rx.take() {
-                    //take consumes the receiver_rx
+                    // take consumes the receiver_rx
 
                     // Try to receive the receiver
                     match rx.try_recv() {
@@ -1044,6 +949,7 @@ impl RustreamApp {
                     if let Some(frame) = frame {
                         if let Some(video_recorder) = &mut self.video_recorder {
                             if video_recorder.is_recording() {
+                                // Start video recording
                                 video_recorder.record_frame(&frame);
                             }
                         }
@@ -1266,11 +1172,6 @@ impl eframe::App for RustreamApp {
             self.triggered_actions.push(action);
         }
         TopBottomPanel::top("header")
-            // .frame(
-            //     Frame::none()
-            //         .fill(ctx.style().visuals.window_fill())
-            //         .inner_margin(8.0),
-            // )
             .show(ctx, |ui| {
                 self.render_header(ui);
             });
@@ -1284,7 +1185,7 @@ impl eframe::App for RustreamApp {
         });
 
         self.triggered_actions.clear();
-        //ctx.request_repaint();
+
         ctx.request_repaint_after(Duration::from_millis(300));
     }
 }

@@ -15,7 +15,6 @@ pub struct AreaCaptureApp {
 
 impl eframe::App for AreaCaptureApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // let mut app = self.rustream_app.lock().unwrap();
 
         // Handle Alt+F4 and window close events
         if ctx.input(|i| i.viewport().close_requested()) {

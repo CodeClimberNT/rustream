@@ -1,4 +1,3 @@
-// https://github.com/emilk/egui/blob/master/examples/images/src/main.rs
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::env;
@@ -87,7 +86,6 @@ async fn main() {
 
     let overlay_options = NativeOptions {
         renderer: eframe::Renderer::Glow,
-        //persist_window: true,
         viewport: ViewportBuilder {
             transparent: Some(true),
             fullscreen: Some(false),

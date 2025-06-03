@@ -1,5 +1,4 @@
 use crate::common::CaptureArea;
-// use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default, PartialEq)]

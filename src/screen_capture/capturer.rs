@@ -68,56 +68,6 @@ impl ScreenCapture {
         &self.monitors
     }
 
-    /*pub fn next_frame(&mut self, capture_area: Option<CaptureArea>) -> Option<CapturedFrame> {
-        if self.capturer.is_none() {
-            let monitor = match get_monitor_from_index(
-                self.config.lock().unwrap().capture.selected_monitor,
-            ) {
-                Ok(m) => m,
-                Err(_) => return None,
-            };
-
-            self.height = monitor.height();
-            self.width = monitor.width();
-            debug!("Monitor dimensions: {}x{}", self.width, self.height);
-            debug!("Monitor dimensions: {}x{}", self.width, self.height);
-
-            self.capturer = match Capturer::new(monitor) {
-                Ok(cap) => Some(cap),
-                Err(e) => {
-                    error!("{}", CaptureError::InitError(e.to_string()));
-                    return None;
-                }
-            };
-        }
-
-        let capturer = self.capturer.as_mut()?;
-
-        match capturer.frame() {
-            Ok(raw_frame) => Some(CapturedFrame::from_bgra_buffer(
-                raw_frame.to_vec(),
-                self.width,
-                self.height,
-                capture_area,
-            )),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock => {
-                    debug!("Frame not ready; skipping this frame.");
-                    debug!("Frame not ready; skipping this frame.");
-                    None
-                }
-                _ => {
-                    error!(
-                        r"Strange Error: {e}.
-                        Resetting capturer."
-                    );
-                    self.reset_capture();
-                    None
-                }
-            },
-        }
-    }*/
-
     pub fn capture_frame(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
 
         let config = self.config.clone();
@@ -205,7 +155,7 @@ impl ScreenCapture {
                         },
                     }
                 }
-                thread::sleep(std::time::Duration::from_millis(1000 / 6));
+                thread::sleep(std::time::Duration::from_millis(1000 / 6)); //capture 6 FPS
             }
             debug!("Capture thread stopped");
             stop_capture.store(false, Ordering::SeqCst);
