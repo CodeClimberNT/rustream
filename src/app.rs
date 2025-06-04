@@ -72,7 +72,7 @@ pub enum PageView {
 }
 
 impl RustreamApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
 
@@ -855,7 +855,6 @@ impl RustreamApp {
                     //receiving already started
                     // Show Stop, Start Recording and Recording Settings buttons
                     ui.horizontal(|ui| {
-                        
                         // Stop button
                         let stop_button = egui::Button::new(
                             egui::RichText::new("Stop")
@@ -1111,12 +1110,21 @@ impl RustreamApp {
                 .unwrap_or_default()
         );
 
+        let button_color = if self.is_blank_screen.load(Ordering::SeqCst)
+            && label.to_lowercase().contains("blank")
+        {
+            egui::Color32::RED
+        } else {
+            ui.style().visuals.widgets.inactive.bg_fill
+        };
+
         // Calculate size with padding for the label only
         let galley = ui.painter().layout_no_wrap(
             label.to_string(),
             egui::TextStyle::Button.resolve(ui.style()),
             egui::Color32::PLACEHOLDER,
         );
+
         let padding = ui.spacing().button_padding;
         let min_size = egui::vec2(
             galley.size().x + padding.x * 2.0,
@@ -1127,7 +1135,8 @@ impl RustreamApp {
         let response = ui
             .add_sized(
                 min_size,
-                egui::Button::new(egui::RichText::new(label.to_string()).size(15.0)),
+                egui::Button::new(egui::RichText::new(label.to_string()).size(15.0))
+                    .fill(button_color),
             )
             .on_hover_text(format!("{}{}", label, hotkey_text));
 

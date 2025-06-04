@@ -142,9 +142,14 @@ pub async fn start_receiving(
         let mut recv = receiver.lock().await;
         println!("Calling recv_data");
 
-        if let Err(_) = recv.recv_data(tx, stop_notify1, stream_ended).await {
+        if recv
+            .recv_data(tx, stop_notify1, stream_ended)
+            .await
+            .is_err()
+        {
             host_unreachable.store(true, Ordering::SeqCst);
         }
+
         drop(recv);
     });
 
@@ -172,8 +177,8 @@ pub async fn start_receiving(
 
                             let frame = CapturedFrame::from_rgba_vec(
                                 blank_frame,
-                                1920 as usize,
-                                1080 as usize,
+                                1920,
+                                1080,
                             );
                             frames.push_back(frame);
                         }
