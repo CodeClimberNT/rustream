@@ -11,6 +11,7 @@ pub enum HotkeyAction {
     TogglePreview,
     ToggleBlankScreen,
     Connect,
+    TogglePause,
 }
 
 impl HotkeyAction {
@@ -110,9 +111,18 @@ impl HotkeyManager {
                 ctrl: false,
                 shift: false,
                 alt: false,
-                key: Key::R,
+                key: Key::B,
             },
-            HotkeyAction::StartRecording,
+            HotkeyAction::ToggleBlankScreen,
+        );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::P,
+            },
+            HotkeyAction::TogglePause,
         );
         self.default_shortcuts.insert(
             KeyCombination {
@@ -133,6 +143,7 @@ impl HotkeyManager {
             },
             HotkeyAction::Connect,
         );
+
         // self.default_shortcuts.insert(
         //     KeyCombination {
         //         ctrl: true,

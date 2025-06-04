@@ -1,47 +1,50 @@
 use std::collections::VecDeque;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
-use tokio::sync::{mpsc, Mutex, Notify};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 use crate::screen_capture::CapturedFrame;
 
 pub struct Receiver {
     pub socket: TcpStream,
-    pub started_receiving: bool
+    pub started_receiving: bool,
 }
 
 impl Receiver {
     //create a new receiver, its socket and connect to the caster
     pub async fn new(caster: SocketAddr) -> Result<Self, std::io::Error> {
-        
         match TcpStream::connect(caster).await {
             Ok(stream) => {
                 println!("Connected to sender at {}", caster);
 
                 Ok(Self {
                     socket: stream,
-                    started_receiving: false
+                    started_receiving: false,
                 })
             }
             Err(e) => {
                 eprintln!("Failed to connect to sender: {}", e);
                 Err(e)
             }
-        }       
+        }
     }
 
-    pub async fn recv_data(&mut self, tx: mpsc::Sender<Vec<u8>>, stop_notify: Arc<Notify>, stream_ended: Arc<AtomicBool> ) -> Result<(), std::io::Error> {
-
-        loop {            
+    pub async fn recv_data(
+        &mut self,
+        tx: mpsc::Sender<Vec<u8>>,
+        stop_notify: Arc<Notify>,
+        stream_ended: Arc<AtomicBool>,
+    ) -> Result<(), std::io::Error> {
+        loop {
             let mut buf = vec![0; 4]; // Buffer to read frame size
-            
+
             tokio::select! {
                 _ = stop_notify.notified() => {
                     println!("Received stop signal, exiting recv_data");
@@ -60,7 +63,7 @@ impl Receiver {
                                 if message.trim_matches('\0') == "END" {
                                     println!("Received END message");
                                     stream_ended.store(true, Ordering::SeqCst);
-                                    break;                    
+                                    break;
                                 }
                                 else if message.trim_matches('\0') == "BLNK" {
                                     println!("Received BLNK message");
@@ -70,7 +73,7 @@ impl Receiver {
                                     continue;
                                 }
                             }
-                            
+
                             let frame_size = u32::from_ne_bytes(buf.try_into().unwrap());
                             let mut frame = vec![0; frame_size as usize];
                             println!("Frame size: {:?}", frame_size);
@@ -94,7 +97,7 @@ impl Receiver {
                                     return Err(e);
                                 }
                             }
-                            
+
                         }
                         Err(e) => {
                             eprintln!("Error receiving frame size: {}", e);
@@ -108,8 +111,7 @@ impl Receiver {
     }
 }
 
-async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {      
-   
+async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>>, frame: Vec<u8>) {
     let start = Instant::now();
     let decoded_frame = decode_from_h265_to_rgba(frame);
     let decode_time = start.elapsed();
@@ -118,8 +120,8 @@ async fn process_frame(frames_vec: Arc<std::sync::Mutex<VecDeque<CapturedFrame>>
         Ok(frame) => {
             let mut frames = frames_vec.lock().unwrap();
             frames.push_back(frame);
-        },
-        Err(e) =>  {
+        }
+        Err(e) => {
             eprintln!("Error decoding frame: {}", e);
         }
     };
@@ -130,61 +132,63 @@ pub async fn start_receiving(
     receiver: Arc<Mutex<Receiver>>,
     stop_notify: Arc<Notify>,
     host_unreachable: Arc<AtomicBool>,
-    stream_ended: Arc<AtomicBool>
+    stream_ended: Arc<AtomicBool>,
+    is_paused: Arc<AtomicBool>,
 ) {
- 
-    let stop_notify1 = stop_notify.clone();    
+    let stop_notify1 = stop_notify.clone();
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
-        
-    tokio::spawn(async move {        
-        let mut recv = receiver.lock().await;        
+
+    tokio::spawn(async move {
+        let mut recv = receiver.lock().await;
         println!("Calling recv_data");
-        
-        if let Err(_) = recv.recv_data(tx, stop_notify1, stream_ended).await{
-            host_unreachable.store(true, Ordering::SeqCst);           
-        } 
-        drop(recv);           
+
+        if let Err(_) = recv.recv_data(tx, stop_notify1, stream_ended).await {
+            host_unreachable.store(true, Ordering::SeqCst);
+        }
+        drop(recv);
     });
-        
+
     loop {
         let frames_vec1 = frames_vec.clone();
         tokio::select! {
             _ = stop_notify.notified() => {
-                println!("Received stop signal, exiting start_receiving"); 
+                println!("Received stop signal, exiting start_receiving");
                 break; // Gracefully exit when `notify_waiters()` is called
             }
 
             Some(frame) = rx.recv() => {
 
-                if let Ok(message) = from_utf8(&frame) {
-                    //blank screen
-                    if message.trim_matches('\0') == "BLNK" {
-                        
-                        let mut blank_frame = Vec::with_capacity(1920 * 1080 * 4);
-                        for _ in 0..(1920 * 1080) {
-                            blank_frame.extend_from_slice(&[0, 0, 0, 255]); // BGRA o RGBA nero opaco
+                if !is_paused.load(Ordering::SeqCst) {
+
+                    if let Ok(message) = from_utf8(&frame) {
+                        //blank screen
+                        if message.trim_matches('\0') == "BLNK" {
+
+                            let mut blank_frame = Vec::with_capacity(1920 * 1080 * 4);
+                            for _ in 0..(1920 * 1080) {
+                                blank_frame.extend_from_slice(&[0, 0, 0, 255]); // BGRA o RGBA nero opaco
+                            }
+                            let mut frames = frames_vec1.lock().unwrap();
+
+                            let frame = CapturedFrame::from_rgba_vec(
+                                blank_frame,
+                                1920 as usize,
+                                1080 as usize,
+                            );
+                            frames.push_back(frame);
                         }
-                        let mut frames = frames_vec1.lock().unwrap();
-                        
-                        let frame = CapturedFrame::from_rgba_vec(
-                            blank_frame,
-                            1920 as usize,
-                            1080 as usize,
-                        );
-                        frames.push_back(frame);
+                    }
+                    else {
+                        tokio::spawn(async move {
+                            println!("Calling process_frame");
+                            process_frame(frames_vec1, frame).await;
+                            // frames_vec is the vector of frames to share with ui
+                        });
                     }
                 }
-                else {
-                    tokio::spawn(async move {
-                    println!("Calling process_frame");
-                    process_frame(frames_vec1, frame).await;
-                    // frames_vec is the vector of frames to share with ui                    
-                    }); 
-                } 
             }
-        }  
+        }
     }
-    
 }
 
 fn decode_from_h265_to_rgba(
@@ -204,13 +208,19 @@ fn decode_from_h265_to_rgba(
 
     let mut ffmpeg = command
         .args([
-            "-f", "hevc", // input format is H.265
-            "-i", "pipe:0", // input from stdin
-            "-c:v", "rawvideo",
-            "-preset", "ultrafast",
-            "-pix_fmt", "rgba", // convert to rgba
-            "-f", "rawvideo", // output raw
-            "pipe:1", // output to stdout
+            "-f",
+            "hevc", // input format is H.265
+            "-i",
+            "pipe:0", // input from stdin
+            "-c:v",
+            "rawvideo",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "rgba", // convert to rgba
+            "-f",
+            "rawvideo", // output raw
+            "pipe:1",   // output to stdout
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -220,7 +230,6 @@ fn decode_from_h265_to_rgba(
     // write encoded frame in stdin
     if let Some(stdin) = ffmpeg.stdin.as_mut() {
         stdin.write_all(&frame)?;
-
     } else {
         return Err("Failed to open stdin for ffmpeg".into());
     }
@@ -259,11 +268,16 @@ fn get_h265_dimensions(
 
     let mut ffmpeg = command
         .args([
-            "-f", "hevc",
-            "-i", "pipe:0",
-            "-vframes", "1", // Process only first frame
-            "-vf", "scale=iw:ih", // Force scale filter to report size
-            "-f", "null",
+            "-f",
+            "hevc",
+            "-i",
+            "pipe:0",
+            "-vframes",
+            "1", // Process only first frame
+            "-vf",
+            "scale=iw:ih", // Force scale filter to report size
+            "-f",
+            "null",
             "-",
         ])
         .stdin(Stdio::piped())

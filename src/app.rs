@@ -60,6 +60,7 @@ pub struct RustreamApp {
     end_of_stream: bool, // Flag to signal the end of the stream in the sender
     stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
     is_blank_screen: Arc<AtomicBool>, // Flag to indicate if the screen is blanked
+    is_paused: Arc<AtomicBool>, // Flag to indicate if the stream is paused by receiver
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -72,7 +73,6 @@ pub enum PageView {
 
 impl RustreamApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-
         let config: Arc<Mutex<Config>> = Arc::new(Mutex::new(Config::default()));
         let frame_grabber: ScreenCapture = ScreenCapture::new(config.clone());
 
@@ -111,9 +111,10 @@ impl RustreamApp {
             end_of_stream: false,
             stream_ended: Arc::new(AtomicBool::new(false)),
             is_blank_screen: Arc::new(AtomicBool::new(false)),
+            is_paused: Arc::new(AtomicBool::new(false)),
         }
     }
-    
+
     // Get the available space for the preview screen
     fn get_preview_screen_rect(&self, ui: &egui::Ui) -> Rect {
         ui.available_rect_before_wrap()
@@ -137,7 +138,6 @@ impl RustreamApp {
             self.display_texture = None;
             self.capture_area = None;
             self.video_recorder = None; //dropping video recorder, the video is saved
-        
         } else if self.page == PageView::Receiver {
             //if we are exiting from receiver mode
             self.reset_receiving();
@@ -586,7 +586,7 @@ impl RustreamApp {
                         self.stop_notify.notify_waiters();
                         self.captured_frames.lock().unwrap().clear();
                         self.end_of_stream = true;
-                     }
+                    }
                 }
 
                 if self.action_button(
@@ -656,7 +656,6 @@ impl RustreamApp {
 
             let mut frames = self.captured_frames.lock().unwrap();
             if let Some(mut display_frame) = frames.pop_front() {
-                
                 if frames.len() >= 7 {
                     println!("Captured_Frames len: {}, dropping frames", frames.len());
                     frames.clear();
@@ -710,14 +709,19 @@ impl RustreamApp {
                     // Send frame if we have a sender
                     if let Some(sender) = &self.sender {
                         //i redo the check to extract the sender from Option<Sender>
-                        let sender_clone = sender.clone();                                                    
+                        let sender_clone = sender.clone();
                         let clone_frame = display_frame.clone();
                         let stop_notify = self.stop_notify.clone();
                         let is_blank_clone = self.is_blank_screen.clone();
 
                         tokio::spawn(async move {
-                            if let Err(e) =
-                                start_streaming(sender_clone, clone_frame, stop_notify, is_blank_clone).await
+                            if let Err(e) = start_streaming(
+                                sender_clone,
+                                clone_frame,
+                                stop_notify,
+                                is_blank_clone,
+                            )
+                            .await
                             {
                                 eprintln!("Error sending frame: {}", e);
                             }
@@ -738,7 +742,7 @@ impl RustreamApp {
                     &display_frame.rgba_data,
                 );
 
-                // Update texture in memory           
+                // Update texture in memory
                 if self.is_preview_screen {
                     match self.display_texture {
                         Some(ref mut texture) => {
@@ -801,7 +805,8 @@ impl RustreamApp {
                     //if connect button is clicked
                     if ui
                         .add_enabled(!self.address_text.trim().is_empty(), connect_button)
-                        .clicked() || self.triggered_actions.contains(&HotkeyAction::Connect)
+                        .clicked()
+                        || self.triggered_actions.contains(&HotkeyAction::Connect)
                     {
                         //check if inserted address is valid
                         if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
@@ -812,7 +817,7 @@ impl RustreamApp {
                             //clear the previous frame queue to prevent frames from previous streaming from being displayed
                             let mut frames = self.received_frames.lock().unwrap();
                             frames.clear();
-                            drop(frames);                    
+                            drop(frames);
 
                             let (tx, rx) = channel();
                             let host_unreachable = self.host_unreachable.clone();
@@ -827,13 +832,12 @@ impl RustreamApp {
                                         eprintln!("Error initializing receiver: {}", e);
                                         host_unreachable.store(true, Ordering::SeqCst);
                                     }
-                                }                           
+                                }
                             });
 
                             //store rx to poll it later to see if initialization completed, since the channel sender is async
                             self.receiver_rx = Some(rx);
                             self.is_receiving = true;
-
                         } else {
                             self.is_address_valid = false;
                         }
@@ -851,35 +855,45 @@ impl RustreamApp {
                     //receiving already started
                     // Show Stop, Start Recording and Recording Settings buttons
                     ui.horizontal(|ui| {
-                        ui.vertical_centered(|ui| {
-                            let stop_button = egui::Button::new(
-                                egui::RichText::new("Stop")
-                                    .color(egui::Color32::WHITE)
-                                    .size(15.0),
-                            )
-                            .fill(egui::Color32::from_rgb(200, 0, 0))
-                            .min_size(egui::vec2(60.0, 30.0));
+                        
+                        // Stop button
+                        let stop_button = egui::Button::new(
+                            egui::RichText::new("Stop")
+                                .color(egui::Color32::WHITE)
+                                .size(15.0),
+                        )
+                        .fill(egui::Color32::from_rgb(200, 0, 0))
+                        .min_size(egui::vec2(60.0, 30.0));
+                        ui.add_space(10.0);
+                        //Stop button
+                        if ui.add(stop_button).clicked() {
+                            self.reset_receiving();
+                        }
 
-                            //Stop button
-                            if ui.add(stop_button).clicked() {
-                                self.reset_receiving();
-                            }
-                        });
+                        // Pause button
+                        ui.add_space(10.0);
+                        if self.action_button(
+                            ui,
+                            if self.is_paused.load(Ordering::SeqCst) {
+                                "▶ Resume Streaming"
+                            } else {
+                                "⏸ Pause Streaming"
+                            },
+                            HotkeyAction::TogglePause,
+                        ) {
+                            self.is_paused
+                                .store(!self.is_paused.load(Ordering::SeqCst), Ordering::SeqCst);
+                        }
 
-                        // Start Recording button
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(10.0);
-                            self.render_recording_controls(ui);
+                        //  Recording Settings button
+                        ui.add_space(10.0);
+                        self.render_recording_controls(ui);
 
-                            ui.add_space(5.0);
-                            if self.action_button(
-                                ui,
-                                "⚙ Recording Settings",
-                                HotkeyAction::ClosePopup,
-                            ) {
-                                self.show_config = true;
-                            }
-                        });
+                        ui.add_space(5.0);
+                        if self.action_button(ui, "⚙ Recording Settings", HotkeyAction::ClosePopup)
+                        {
+                            self.show_config = true;
+                        }
                     });
                 }
 
@@ -899,13 +913,17 @@ impl RustreamApp {
 
                 // Show Stream Ended message
                 if self.stream_ended.load(Ordering::SeqCst) {
-                    
                     ui.add_space(ui.available_size().y * 0.40);
                     ui.label(RichText::new("End Of The Stream").size(30.0));
 
                     let mut frames = self.received_frames.lock().unwrap();
                     frames.clear();
                     self.display_texture = None;
+                }
+
+                // Show Pause message
+                if self.is_paused.load(Ordering::SeqCst) {
+                    ui.label(RichText::new("Paused").size(30.0));
                 }
 
                 // Check if we have a pending receiver initialization
@@ -941,6 +959,7 @@ impl RustreamApp {
                     let stop_notify = self.stop_notify.clone();
                     let host_unreachable = self.host_unreachable.clone();
                     let stream_ended = self.stream_ended.clone();
+                    let is_paused_clone = self.is_paused.clone();
 
                     tokio::spawn(async move {
                         let mut receiver = receiver_clone.lock().await;
@@ -955,6 +974,7 @@ impl RustreamApp {
                                 stop_notify,
                                 host_unreachable,
                                 stream_ended,
+                                is_paused_clone,
                             )
                             .await;
                         }
@@ -1192,10 +1212,9 @@ impl eframe::App for RustreamApp {
         if let Some(action) = self.hotkey_manager.handle_input(ctx) {
             self.triggered_actions.push(action);
         }
-        TopBottomPanel::top("header")
-            .show(ctx, |ui| {
-                self.render_header(ui);
-            });
+        TopBottomPanel::top("header").show(ctx, |ui| {
+            self.render_header(ui);
+        });
 
         CentralPanel::default().show(ctx, |ui| match self.page {
             PageView::HomePage => self.home_page(ui),
