@@ -10,10 +10,7 @@ pub enum HotkeyAction {
     ToggleStreaming,
     TogglePreview,
     ToggleBlankScreen,
-    // TODO: Add more actions
-    // Quit,
-    // Blanking the screen,
-    // Terminating the current session
+    Connect,
 }
 
 impl HotkeyAction {
@@ -125,6 +122,16 @@ impl HotkeyManager {
                 key: Key::Home,
             },
             HotkeyAction::Home,
+        );
+
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::Enter,
+            },
+            HotkeyAction::Connect,
         );
         // self.default_shortcuts.insert(
         //     KeyCombination {

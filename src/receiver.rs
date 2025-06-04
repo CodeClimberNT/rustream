@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
-use image::ImageBuffer;
 use tokio::sync::{mpsc, Mutex, Notify};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::SocketAddr;

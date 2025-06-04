@@ -801,7 +801,7 @@ impl RustreamApp {
                     //if connect button is clicked
                     if ui
                         .add_enabled(!self.address_text.trim().is_empty(), connect_button)
-                        .clicked()
+                        .clicked() || self.triggered_actions.contains(&HotkeyAction::Connect)
                     {
                         //check if inserted address is valid
                         if let Ok(addr) = self.address_text.parse::<Ipv4Addr>() {
@@ -891,6 +891,10 @@ impl RustreamApp {
                             .color(Color32::RED)
                             .size(20.0),
                     );
+
+                    let mut frames = self.received_frames.lock().unwrap();
+                    frames.clear();
+                    self.display_texture = None;
                 }
 
                 // Show Stream Ended message
