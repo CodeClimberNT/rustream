@@ -92,7 +92,7 @@ impl HotkeyManager {
             KeyCombination {
                 ctrl: false,
                 shift: false,
-                alt: false,
+                alt: true,
                 key: Key::P,
             },
             HotkeyAction::TogglePreview,
