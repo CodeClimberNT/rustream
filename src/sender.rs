@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{self, Interest};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify, RwLock};
+use std::sync::atomic::Ordering;
 
 use crate::screen_capture::CapturedFrame;
 
@@ -54,7 +56,7 @@ impl Sender {
         });
     }
 
-    pub async fn send_data(&mut self, frame: CapturedFrame) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send_data(&mut self, frame: CapturedFrame, is_blank_screen: Arc<AtomicBool>) -> Result<(), Box<dyn std::error::Error>> {
         let recv = self.receivers.clone();
     
         let mut disconnected_peers = self.disconnected_peers.lock().await;
@@ -98,6 +100,7 @@ impl Sender {
             let encoded_frame1 = encoded_frame.clone();
             let stream1 = stream.clone();
             let peer_addr = *peer_addr;
+            let is_blank_clone = is_blank_screen.clone();
             
             tokio::spawn( async move {
                 
@@ -108,10 +111,21 @@ impl Sender {
                     if ready.is_writable() {
                         // Try to write data, this may still fail with `WouldBlock`
                         // if the readiness event is a false positive.
-                        let frame_size = (encoded_frame1.len() as u32).to_ne_bytes();
+
                         let mut pkt = Vec::new();
-                        pkt.extend_from_slice(&frame_size);
-                        pkt.extend_from_slice(&encoded_frame1);                                    
+                        
+                        if is_blank_clone.load(Ordering::SeqCst) {
+                            // If it's a blank screen, send BLNK message
+                            let message = b"BLNK";
+                            pkt.extend_from_slice(message);
+                        }
+                        else {
+
+                            let frame_size = (encoded_frame1.len() as u32).to_ne_bytes();
+                            // Create a packet with frame size and encoded frame
+                            pkt.extend_from_slice(&frame_size);
+                            pkt.extend_from_slice(&encoded_frame1);  
+                        }                                  
 
                         match stream1.try_write(&pkt) {
                             
@@ -209,6 +223,7 @@ pub async fn start_streaming(
     sender: Arc<Mutex<Sender>>,
     frame: CapturedFrame,
     stop_notify: Arc<Notify>,
+    is_blank_screen: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     let mut sender = sender.lock().await;
@@ -219,7 +234,7 @@ pub async fn start_streaming(
         sender.listen_for_receivers(stop_notify).await;
     }
 
-    return match sender.send_data(frame).await {
+    return match sender.send_data(frame, is_blank_screen).await {
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     };

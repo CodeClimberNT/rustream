@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::str::from_utf8;
+use image::ImageBuffer;
 use tokio::sync::{mpsc, Mutex, Notify};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::net::SocketAddr;
@@ -62,7 +63,15 @@ impl Receiver {
                                     stream_ended.store(true, Ordering::SeqCst);
                                     break;                    
                                 }
-                            } 
+                                else if message.trim_matches('\0') == "BLNK" {
+                                    println!("Received BLNK message");
+                                    if let Err(e) = tx.send(message.as_bytes().to_vec()).await {
+                                        eprintln!("Error sending encoded frame to start_receiving: {}", e);
+                                    }
+                                    continue;
+                                }
+                            }
+                            
                             let frame_size = u32::from_ne_bytes(buf.try_into().unwrap());
                             let mut frame = vec![0; frame_size as usize];
                             println!("Frame size: {:?}", frame_size);
@@ -147,12 +156,32 @@ pub async fn start_receiving(
             }
 
             Some(frame) = rx.recv() => {
-                
-                tokio::spawn(async move {
+
+                if let Ok(message) = from_utf8(&frame) {
+                    //blank screen
+                    if message.trim_matches('\0') == "BLNK" {
+                        
+                        let mut blank_frame = Vec::with_capacity(1920 * 1080 * 4);
+                        for _ in 0..(1920 * 1080) {
+                            blank_frame.extend_from_slice(&[0, 0, 0, 255]); // BGRA o RGBA nero opaco
+                        }
+                        let mut frames = frames_vec1.lock().unwrap();
+                        
+                        let frame = CapturedFrame::from_rgba_vec(
+                            blank_frame,
+                            1920 as usize,
+                            1080 as usize,
+                        );
+                        frames.push_back(frame);
+                    }
+                }
+                else {
+                    tokio::spawn(async move {
                     println!("Calling process_frame");
                     process_frame(frames_vec1, frame).await;
                     // frames_vec is the vector of frames to share with ui                    
-                }); 
+                    }); 
+                } 
             }
         }  
     }

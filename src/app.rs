@@ -59,6 +59,7 @@ pub struct RustreamApp {
     is_preview_screen: bool,
     end_of_stream: bool, // Flag to signal the end of the stream in the sender
     stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
+    is_blank_screen: Arc<AtomicBool>, // Flag to indicate if the screen is blanked
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -109,6 +110,7 @@ impl RustreamApp {
             is_preview_screen: true,
             end_of_stream: false,
             stream_ended: Arc::new(AtomicBool::new(false)),
+            is_blank_screen: Arc::new(AtomicBool::new(false)),
         }
     }
     
@@ -599,6 +601,20 @@ impl RustreamApp {
                     self.is_preview_screen = !self.is_preview_screen;
                 }
 
+                if self.action_button(
+                    ui,
+                    if !self.is_blank_screen.load(Ordering::SeqCst) {
+                        "🌓 Blank Screen"
+                    } else {
+                        "🌓 Unblank Screen"
+                    },
+                    HotkeyAction::TogglePreview,
+                ) {
+                    let current = self.is_blank_screen.load(Ordering::SeqCst);
+                    let new = !current;
+                    self.is_blank_screen.store(new, Ordering::SeqCst);
+                }
+
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
                     let selected_monitor = self.config.lock().unwrap().capture.selected_monitor;
                     let displays = DisplayInfo::all().unwrap_or_default();
@@ -697,10 +713,11 @@ impl RustreamApp {
                         let sender_clone = sender.clone();                                                    
                         let clone_frame = display_frame.clone();
                         let stop_notify = self.stop_notify.clone();
+                        let is_blank_clone = self.is_blank_screen.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) =
-                                start_streaming(sender_clone, clone_frame, stop_notify).await
+                                start_streaming(sender_clone, clone_frame, stop_notify, is_blank_clone).await
                             {
                                 eprintln!("Error sending frame: {}", e);
                             }
