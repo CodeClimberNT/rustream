@@ -107,6 +107,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper tag comparison
 
       - name: Get latest tag
         id: get_tag
@@ -114,9 +116,37 @@ jobs:
           git fetch --tags
           tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+          echo "Latest tag: $tag"
+
+      - name: Get current commit hash
+        id: get_commit
+        run: |
+          echo "commit_hash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists for current commit
+        id: check_tag
+        run: |
+          current_commit=$(git rev-parse HEAD)
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          
+          if [ "$latest_tag" != "v0.0.0" ]; then
+            tag_commit=$(git rev-list -n 1 "$latest_tag" 2>/dev/null || echo "")
+            if [ "$current_commit" = "$tag_commit" ]; then
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "Current commit already has tag $latest_tag"
+            else
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "Current commit needs new release"
+            fi
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "No previous tags found, creating first release"
+          fi
 
       - name: Calculate next version
         id: next_version
+        if: steps.check_tag.outputs.should_release == 'true'
         run: |
           current_tag="${{ steps.get_tag.outputs.latest_tag }}"
           current_tag="${current_tag#v}"
@@ -127,37 +157,23 @@ jobs:
           patch=$((patch + 1))
           new_version="$major.$minor.$patch"
           echo "version=$new_version" >> $GITHUB_OUTPUT
+          echo "Next version: v$new_version"
 
       - name: Download all artifacts
+        if: steps.check_tag.outputs.should_release == 'true'
         uses: actions/download-artifact@v4
         with:
           path: dist
   
       - name: List files
+        if: steps.check_tag.outputs.should_release == 'true'
         run: |
           ls -R dist/
           echo "Available artifacts:"
           find dist -type f
-          
-      - name: Get latest tag
-        run: |
-          git fetch --tags
-          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
-
-      - name: Calculate next version
-        run: |
-          current_tag="${{ steps.get_tag.outputs.latest_tag }}"
-          current_tag="${current_tag#v}"  # Removes the 'v' prefix
-          IFS='.' read -ra PARTS <<< "$current_tag"
-          major=${PARTS[0]:-0}
-          minor=${PARTS[1]:-0}
-          patch=${PARTS[2]:-0}
-          patch=$((patch + 1))  # Increments the patch version
-          new_version="$major.$minor.$patch"
-          echo "version=$new_version" >> $GITHUB_OUTPUT
         
       - name: Create Release
+        if: steps.check_tag.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.next_version.outputs.version }}
@@ -167,5 +183,6 @@ jobs:
             dist/rustream-windows-amd64.exe/rustream-windows.exe
             dist/rustream-macos-amd64/rustream-macos
           draft: false
-          prerelease: true
+          prerelease: false
+          generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
