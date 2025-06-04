@@ -983,7 +983,16 @@ impl RustreamApp {
                     let frame = {
                         //in this way the lock is released immediately
                         let mut frames = self.received_frames.lock().unwrap();
-                        frames.pop_front()
+                        // Pop back to minimize latency
+                        // to have a sense of continuous stream, use pop_front
+                        let curr_frame = frames.pop_back();
+
+                        if frames.len() >= 7 {
+                            println!("Received_Frames len: {}, dropping frames", frames.len());
+                            frames.clear();
+                        }
+
+                        curr_frame
                     };
 
                     if let Some(frame) = frame {
