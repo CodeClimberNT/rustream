@@ -608,7 +608,7 @@ impl RustreamApp {
                     } else {
                         "🌓 Unblank Screen"
                     },
-                    HotkeyAction::TogglePreview,
+                    HotkeyAction::ToggleBlankScreen,
                 ) {
                     let current = self.is_blank_screen.load(Ordering::SeqCst);
                     let new = !current;

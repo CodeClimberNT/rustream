@@ -9,6 +9,7 @@ pub enum HotkeyAction {
     StartRecording,
     ToggleStreaming,
     TogglePreview,
+    ToggleBlankScreen,
     // TODO: Add more actions
     // Quit,
     // Blanking the screen,
@@ -97,6 +98,15 @@ impl HotkeyManager {
                 key: Key::P,
             },
             HotkeyAction::TogglePreview,
+        );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::B,
+            },
+            HotkeyAction::ToggleBlankScreen,
         );
         self.default_shortcuts.insert(
             KeyCombination {
