@@ -39,7 +39,8 @@ pub struct RustreamApp {
     streaming_active: bool,
     is_selecting: bool,
     capture_area: Option<CaptureArea>,
-    show_config: bool, // Show config window
+    show_config: bool,        // Show config window
+    show_hotkey_config: bool, // Show config window
     sender: Option<Arc<tokio::sync::Mutex<Sender>>>,
     receiver: Option<Arc<tokio::sync::Mutex<Receiver>>>,
     sender_rx: Option<tokio::sync::oneshot::Receiver<Arc<tokio::sync::Mutex<Sender>>>>,
@@ -101,6 +102,7 @@ impl RustreamApp {
             is_selecting: false,
             capture_area: None,
             show_config: false,
+            show_hotkey_config: false,
             editing_hotkey: None,
             triggered_actions: Vec::new(),
             previous_monitor: 0,
@@ -151,7 +153,7 @@ impl RustreamApp {
         self.page = page;
     }
 
-    fn render_header(&mut self, ui: &mut egui::Ui) {
+    fn render_header(&mut self, ctx: &Context, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             // Home button on the left
             let home_text = RichText::new("🏠").size(24.0);
@@ -183,6 +185,15 @@ impl RustreamApp {
                     .frame(false)
                     .sense(egui::Sense::hover()),
                 ),
+            });
+
+            self.render_hotkey_config(ctx);
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(5.0);
+                if self.action_button(ui, "Hotkeys", HotkeyAction::ToggleHotkeyMenu) {
+                    self.show_hotkey_config = !self.show_hotkey_config;
+                }
             });
         });
     }
@@ -226,8 +237,11 @@ impl RustreamApp {
 
     fn render_config_window(&mut self, ctx: &Context) {
         let mut show_config = self.show_config;
+        if self.triggered_actions.contains(&HotkeyAction::ExitPopup) {
+            show_config = false;
+        }
 
-        Window::new("Configuration")
+        Window::new("Display Settings")
             .open(&mut show_config)
             .resizable(true)
             .movable(true)
@@ -238,10 +252,6 @@ impl RustreamApp {
             )
             .show(ctx, |ui| {
                 let mut config = self.config.lock().unwrap().clone();
-
-                // Display Settings Section
-                ui.heading("Display Settings");
-                ui.separator();
 
                 // Monitor selection
                 let selected_monitor = &mut config.capture.selected_monitor;
@@ -303,11 +313,33 @@ impl RustreamApp {
                     self.is_selecting = false;
                 }
 
-                // Hotkey Settings Section
-                ui.add_space(20.0);
-                ui.heading("Hotkey Settings");
-                ui.separator();
+                // Apply changes
+                if self.config.lock().unwrap().clone() != config {
+                    debug!("Config changed: {:?}", config);
+                    self.config.lock().unwrap().update(config);
+                    self.frame_grabber.reset_capture();
+                }
+            });
 
+        self.show_config = show_config;
+    }
+
+    fn render_hotkey_config(&mut self, ctx: &Context) {
+        let mut show_hotkey_config = self.show_hotkey_config;
+        if self.triggered_actions.contains(&HotkeyAction::ExitPopup) {
+            show_hotkey_config = false;
+        }
+
+        Window::new("Hotkey Settings")
+            .open(&mut show_hotkey_config)
+            .auto_sized()
+            .movable(true)
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .outer_margin(0.0)
+                    .inner_margin(10.0),
+            )
+            .show(ctx, |ui| {
                 egui::Grid::new("hotkeys_grid")
                     .num_columns(3)
                     .spacing([40.0, 4.0])
@@ -365,7 +397,8 @@ impl RustreamApp {
                         }
                     });
 
-                if ui.button("Reset to Default Hotkeys").clicked() {
+                ui.add_space(10.0);
+                if ui.button("Reset all Hotkeys").clicked() {
                     self.hotkey_manager.reset_to_defaults();
                 }
 
@@ -373,16 +406,8 @@ impl RustreamApp {
                 if let Some(editing_action) = &self.editing_hotkey {
                     self.show_hotkey_popup(ctx, editing_action.clone());
                 }
-
-                // Apply changes
-                if self.config.lock().unwrap().clone() != config {
-                    debug!("Config changed: {:?}", config);
-                    self.config.lock().unwrap().update(config);
-                    self.frame_grabber.reset_capture();
-                }
             });
-
-        self.show_config = show_config;
+        self.show_hotkey_config = show_hotkey_config;
     }
 
     // Helper method to show hotkey popup
@@ -477,7 +502,11 @@ impl RustreamApp {
     fn render_recording_settings(&mut self, ctx: &Context) {
         let mut show_config = self.show_config;
 
-        Window::new("Configuration")
+        if self.triggered_actions.contains(&HotkeyAction::ExitPopup) {
+            show_config = false;
+        }
+
+        Window::new("Recording Settings")
             .open(&mut show_config)
             .resizable(true)
             .movable(true)
@@ -488,9 +517,6 @@ impl RustreamApp {
             )
             .show(ctx, |ui| {
                 let mut config = self.config.lock().unwrap().clone();
-
-                ui.heading("Recording Settings");
-                ui.separator();
 
                 // Output path configuration
                 ui.horizontal(|ui| {
@@ -634,8 +660,8 @@ impl RustreamApp {
                         .spawn();
                 }
 
-                if self.action_button(ui, "⚙ Settings", HotkeyAction::ClosePopup) {
-                    self.show_config = true;
+                if self.action_button(ui, "🖥 Display Settings", HotkeyAction::ToggleSettings) {
+                    self.show_config = !self.show_config;
                 }
                 ui.add_space(50.0);
             });
@@ -930,9 +956,12 @@ impl RustreamApp {
                         self.render_recording_controls(ui);
 
                         ui.add_space(5.0);
-                        if self.action_button(ui, "⚙ Recording Settings", HotkeyAction::ClosePopup)
-                        {
-                            self.show_config = true;
+                        if self.action_button(
+                            ui,
+                            "⚙ Recording Settings",
+                            HotkeyAction::ToggleSettings,
+                        ) {
+                            self.show_config = !self.show_config;
                         }
                     });
                 }
@@ -1272,7 +1301,7 @@ impl eframe::App for RustreamApp {
             self.triggered_actions.push(action);
         }
         TopBottomPanel::top("header").show(ctx, |ui| {
-            self.render_header(ui);
+            self.render_header(ctx, ui);
         });
 
         CentralPanel::default().show(ctx, |ui| match self.page {

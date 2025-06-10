@@ -4,19 +4,21 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum HotkeyAction {
     Annotation,
-    ClosePopup,
+    ToggleSettings,
+    ExitPopup,
     Home,
     StartRecording,
     ToggleStreaming,
     TogglePreview,
     ToggleBlankScreen,
+    ToggleHotkeyMenu,
     Connect,
     TogglePause,
 }
 
 impl HotkeyAction {
     pub fn is_visible(&self) -> bool {
-        !matches!(self, HotkeyAction::ClosePopup)
+        !matches!(self, HotkeyAction::ExitPopup)
     }
 }
 
@@ -79,6 +81,15 @@ impl HotkeyManager {
 
     fn setup_default_shortcuts(&mut self) {
         // Define default shortcuts
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                key: Key::Escape,
+            },
+            HotkeyAction::ExitPopup,
+        );
         self.default_shortcuts.insert(
             KeyCombination {
                 ctrl: true,
@@ -155,12 +166,12 @@ impl HotkeyManager {
         // );
         self.default_shortcuts.insert(
             KeyCombination {
-                ctrl: false,
+                ctrl: true,
                 shift: false,
                 alt: false,
-                key: Key::Escape,
+                key: Key::Period,
             },
-            HotkeyAction::ClosePopup,
+            HotkeyAction::ToggleSettings,
         );
         self.default_shortcuts.insert(
             KeyCombination {
@@ -170,6 +181,15 @@ impl HotkeyManager {
                 key: Key::A,
             },
             HotkeyAction::Annotation,
+        );
+        self.default_shortcuts.insert(
+            KeyCombination {
+                ctrl: true,
+                shift: false,
+                alt: false,
+                key: Key::Comma,
+            },
+            HotkeyAction::ToggleHotkeyMenu,
         );
 
         // Copy defaults to active shortcuts
@@ -259,7 +279,11 @@ impl HotkeyManager {
 impl std::fmt::Display for KeyCombination {
     #[cfg(not(target_os = "macos"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let key_str = format!("{:?}", self.key);
+        let key_str = match self.key {
+            Key::Comma => ",".to_string(),
+            Key::Period => ".".to_string(),
+            _ => format!("{:?}", self.key),
+        };
         write!(
             f,
             "{}{}{}{}",
@@ -273,6 +297,8 @@ impl std::fmt::Display for KeyCombination {
     #[cfg(target_os = "macos")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let key_str = match self.key {
+            Key::Comma => ",".to_string(),
+            Key::Period => ".".to_string(),
             Key::Escape => "⎋".to_string(),
             Key::Tab => "⇥".to_string(),
             Key::Backspace => "⌫".to_string(),
