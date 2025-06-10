@@ -12,7 +12,7 @@ use crate::screen_capture::CapturedFrame;
 pub const PORT: u16 = 56123;
 
 pub struct Sender {
-    receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
+    pub receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
     disconnected_peers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: u32,
     pub started_sending: bool,

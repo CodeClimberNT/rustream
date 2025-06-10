@@ -109,7 +109,7 @@ async fn main() {
                     overlay_options,
                     Box::new(|_cc| Ok(Box::new(AreaCaptureApp::default()))),
                 )
-                .expect("Failed to run Resize Screen");
+                .expect("Failed to run Area Selection Overlay");
             }
             "annotation" => {
                 eframe::run_native(
@@ -117,7 +117,7 @@ async fn main() {
                     overlay_options,
                     Box::new(|_cc| Ok(Box::new(annotation::AnnotationApp::default()))),
                 )
-                .expect("Failed to run Resize Screen");
+                .expect("Failed to run Annotation Overlay");
             }
             _ => {
                 error!("Invalid mode: {}", mode);

@@ -1,19 +1,24 @@
 use super::CapturedFrame;
+
 use crate::config::Config;
+
 use image::{ImageBuffer, RgbaImage};
 use log::{debug, error};
 use scrap::{Capturer, Display};
 use std::{
     collections::VecDeque,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
     #[error("No monitors found")]
-    NoMonitors,
-    #[error("Invalid monitor index {0}")]
+    NoMonitors(),
+    #[error("Failed to retrieve monitor with index {0}")]
     InvalidIndex(usize),
     #[error("Failed to initialize capture: {0}")]
     InitError(String),
@@ -58,7 +63,7 @@ impl ScreenCapture {
         self.width = 0;
         self.height = 0;
     }
-    
+
     pub fn stop_capture(&mut self) {
         self.reset_capture();
         self.stop_capture.store(true, Ordering::SeqCst); // Stop the capture thread
@@ -68,10 +73,10 @@ impl ScreenCapture {
         &self.monitors
     }
 
-    pub fn capture_frame(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
-
+    pub fn start_capture(&self, captured_frames: Arc<Mutex<VecDeque<CapturedFrame>>>) {
         let config = self.config.clone();
         let stop_capture = self.stop_capture.clone();
+        stop_capture.store(false, Ordering::SeqCst);
 
         thread::spawn(move || {
             let mut current_monitor_index: Option<usize> = None;
@@ -89,8 +94,8 @@ impl ScreenCapture {
                 if current_monitor_index != Some(new_monitor_index) || capturer.is_none() {
                     let monitor = match get_monitor_from_index(new_monitor_index) {
                         Ok(m) => m,
-                        Err(_) => {
-                            error!("Failed to get monitor with index {}", new_monitor_index);
+                        Err(e) => {
+                            error!("Error: {}", e);
                             thread::sleep(std::time::Duration::from_secs(1));
                             return;
                         }
@@ -164,16 +169,17 @@ impl ScreenCapture {
 }
 
 fn get_monitors() -> Result<Vec<Display>, CaptureError> {
-    let monitors: Vec<Display> = Display::all().map_err(|_| CaptureError::NoMonitors)?;
+    let monitors: Vec<Display> = Display::all().map_err(|_| CaptureError::NoMonitors())?;
+
     if monitors.is_empty() {
-        return Err(CaptureError::NoMonitors);
+        return Err(CaptureError::NoMonitors());
     }
 
     Ok(monitors)
 }
 
 pub fn get_monitor_from_index(index: usize) -> Result<Display, CaptureError> {
-    let mut monitors: Vec<Display> = get_monitors().map_err(|_| CaptureError::NoMonitors)?;
+    let mut monitors: Vec<Display> = get_monitors()?;
 
     if index >= monitors.len() {
         return Err(CaptureError::InvalidIndex(index));

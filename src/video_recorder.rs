@@ -183,6 +183,7 @@ impl VideoRecorder {
         true
     }
 
+    //https://www.ffmpeg.org/ffmpeg.html
     fn run_ffmpeg_command(video_config: &VideoConfig, fps: u32) {
         let output_path = Self::generate_unique_path(video_config.output_path.clone());
         info!("Generating video...");

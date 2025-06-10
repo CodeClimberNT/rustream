@@ -567,7 +567,7 @@ impl RustreamApp {
         }
     }
 
-    fn caster_page(&mut self, ui: &mut egui::Ui, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn caster_page(&mut self, ctx: &Context, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
                 if self.action_button(
@@ -624,8 +624,7 @@ impl RustreamApp {
                         std::process::exit(1);
                     });
 
-                    #[allow(unused_must_use)]
-                    Command::new(env::current_exe().unwrap())
+                    let _ = Command::new(env::current_exe().unwrap())
                         .arg("--overlay:annotation")
                         .arg(display.x.to_string())
                         .arg(display.y.to_string())
@@ -651,7 +650,7 @@ impl RustreamApp {
             if !self.started_capture {
                 //call capture_frame only once
                 self.started_capture = true;
-                self.frame_grabber.capture_frame(cap_frames);
+                self.frame_grabber.start_capture(cap_frames);
             }
 
             let mut frames = self.captured_frames.lock().unwrap();
@@ -768,13 +767,55 @@ impl RustreamApp {
         });
     }
 
+    fn render_streaming_info(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Live indicator
+                let is_streaming = self.streaming_active;
+                let (circle_color, text_color, text_content) = if is_streaming {
+                    let text_color = if ctx.style().visuals.dark_mode {
+                        Color32::WHITE
+                    } else {
+                        Color32::BLACK
+                    };
+                    (Color32::RED, text_color, "LIVE")
+                } else {
+                    (Color32::GRAY, Color32::GRAY, "LIVE")
+                };
+
+                // Draw circle
+                let circle_radius = 8.0;
+                let circle_diameter = circle_radius * 2.0;
+
+                let (response, painter) = ui.allocate_painter(
+                    egui::Vec2::new(circle_diameter + 50.0, circle_diameter),
+                    egui::Sense::hover(),
+                );
+
+                let circle_center =
+                    response.rect.left_center() + egui::Vec2::new(circle_radius, 0.0);
+                painter.circle_filled(circle_center, circle_radius, circle_color);
+
+                // Draw text next to circle
+                let text_pos = circle_center + egui::Vec2::new(circle_diameter, 0.0);
+                painter.text(
+                    text_pos,
+                    egui::Align2::LEFT_CENTER,
+                    text_content,
+                    egui::FontId::new(14.0, egui::FontFamily::Proportional),
+                    text_color,
+                );
+            });
+        });
+    }
+
     pub fn receiver_page(&mut self, ctx: &Context, _ui: &mut Ui) {
         if self.video_recorder.is_none() {
             // initialize video recorder
             self.video_recorder = Some(VideoRecorder::new(self.config.clone()));
         }
 
-        self.show_fps_counter(ctx);
+        // self.show_fps_counter(ctx);
         // Render the recording settings window if it's open
         self.render_recording_settings(ctx);
 
@@ -1184,20 +1225,20 @@ impl RustreamApp {
         response.clicked() || self.triggered_actions.contains(&action)
     }
 
-    fn show_fps_counter(&self, ctx: &Context) {
-        egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.current_fps > 0.0 {
-                        ui.colored_label(
-                            egui::Color32::GREEN,
-                            format!("FPS: {:.1}", self.current_fps),
-                        );
-                    }
-                });
-            });
-        });
-    }
+    // fn show_fps_counter(&self, ctx: &Context) {
+    //     egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
+    //         ui.horizontal(|ui| {
+    //             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    //                 if self.current_fps > 0.0 {
+    //                     ui.colored_label(
+    //                         egui::Color32::GREEN,
+    //                         format!("FPS: {:.1}", self.current_fps),
+    //                     );
+    //                 }
+    //             });
+    //         });
+    //     });
+    // }
 
     fn process_selection_response(&mut self, json_response: serde_json::Value) {
         match json_response["status"].as_str() {
@@ -1226,7 +1267,7 @@ impl RustreamApp {
 }
 
 impl eframe::App for RustreamApp {
-    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if let Some(action) = self.hotkey_manager.handle_input(ctx) {
             self.triggered_actions.push(action);
         }
@@ -1237,10 +1278,17 @@ impl eframe::App for RustreamApp {
         CentralPanel::default().show(ctx, |ui| match self.page {
             PageView::HomePage => self.home_page(ui),
 
-            PageView::Caster => self.caster_page(ui, ctx, frame),
+            PageView::Caster => self.caster_page(ctx, ui),
 
             PageView::Receiver => self.receiver_page(ctx, ui),
         });
+
+        if self.page == PageView::Caster {
+            TopBottomPanel::bottom("streaming_info").show(ctx, |ui| {
+                ui.add_space(2.5);
+                self.render_streaming_info(ui, ctx);
+            });
+        }
 
         self.triggered_actions.clear();
 
