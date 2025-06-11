@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex, Notify};
 
 pub struct Receiver {
-    pub socket: TcpStream,
+    socket: TcpStream,
     pub started_receiving: bool,
 }
 

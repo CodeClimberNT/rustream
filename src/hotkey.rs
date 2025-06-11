@@ -92,7 +92,7 @@ impl HotkeyManager {
         );
         self.default_shortcuts.insert(
             KeyCombination {
-                ctrl: true,
+                ctrl: false,
                 shift: false,
                 alt: false,
                 key: Key::S,
@@ -113,9 +113,9 @@ impl HotkeyManager {
                 ctrl: false,
                 shift: false,
                 alt: false,
-                key: Key::B,
+                key: Key::R,
             },
-            HotkeyAction::ToggleBlankScreen,
+            HotkeyAction::StartRecording,
         );
         self.default_shortcuts.insert(
             KeyCombination {
@@ -169,7 +169,7 @@ impl HotkeyManager {
                 ctrl: true,
                 shift: false,
                 alt: false,
-                key: Key::Period,
+                key: Key::S,
             },
             HotkeyAction::ToggleSettings,
         );
@@ -187,7 +187,7 @@ impl HotkeyManager {
                 ctrl: true,
                 shift: false,
                 alt: false,
-                key: Key::Comma,
+                key: Key::H,
             },
             HotkeyAction::ToggleHotkeyMenu,
         );

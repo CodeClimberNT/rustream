@@ -7,6 +7,8 @@ use crate::sender::{start_streaming, Sender, PORT};
 use crate::video_recorder::VideoRecorder;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+// use std::os::windows::thread; // Remove this line
+use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -19,7 +21,7 @@ use egui::{
     TextureHandle, TopBottomPanel, Ui, Window,
 };
 
-use std::env;
+use std::{env};
 use std::process::Command;
 
 use display_info::DisplayInfo;
@@ -62,6 +64,7 @@ pub struct RustreamApp {
     stream_ended: Arc<AtomicBool>, // Flag to signal the end of the stream in the receiver
     is_blank_screen: Arc<AtomicBool>, // Flag to indicate if the screen is blanked
     is_paused: Arc<AtomicBool>, // Flag to indicate if the stream is paused by receiver
+    is_annotation_open: Arc<AtomicBool>, // Flag to indicate if the annotation overlay is open
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
@@ -114,6 +117,7 @@ impl RustreamApp {
             stream_ended: Arc::new(AtomicBool::new(false)),
             is_blank_screen: Arc::new(AtomicBool::new(false)),
             is_paused: Arc::new(AtomicBool::new(false)),
+            is_annotation_open: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -650,14 +654,23 @@ impl RustreamApp {
                         std::process::exit(1);
                     });
 
-                    let _ = Command::new(env::current_exe().unwrap())
+                    let mut child = Command::new(env::current_exe().unwrap())
                         .arg("--overlay:annotation")
                         .arg(display.x.to_string())
                         .arg(display.y.to_string())
                         .arg(display.width.to_string())
                         .arg(display.height.to_string())
                         .arg(display.scale_factor.to_string())
-                        .spawn();
+                        .spawn()
+                        .expect("Failed to spawn annotation overlay process");
+
+                    self.is_annotation_open = Arc::new(AtomicBool::new(true));
+
+                    let is_open = self.is_annotation_open.clone();
+                    thread::spawn(move || {
+                        let _ = child.wait();                   
+                        is_open.store(false, Ordering::SeqCst);                  
+                    });
                 }
 
                 if self.action_button(ui, "🖥 Display Settings", HotkeyAction::ToggleSettings) {
@@ -738,6 +751,7 @@ impl RustreamApp {
                         let clone_frame = display_frame.clone();
                         let stop_notify = self.stop_notify.clone();
                         let is_blank_clone = self.is_blank_screen.clone();
+                        let is_open = self.is_annotation_open.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) = start_streaming(
@@ -745,6 +759,7 @@ impl RustreamApp {
                                 clone_frame,
                                 stop_notify,
                                 is_blank_clone,
+                                is_open,
                             )
                             .await
                             {
@@ -841,7 +856,7 @@ impl RustreamApp {
             self.video_recorder = Some(VideoRecorder::new(self.config.clone()));
         }
 
-        // self.show_fps_counter(ctx);
+         //self.show_fps_counter(ctx);
         // Render the recording settings window if it's open
         self.render_recording_settings(ctx);
 
@@ -1254,20 +1269,20 @@ impl RustreamApp {
         response.clicked() || self.triggered_actions.contains(&action)
     }
 
-    // fn show_fps_counter(&self, ctx: &Context) {
-    //     egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
-    //         ui.horizontal(|ui| {
-    //             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-    //                 if self.current_fps > 0.0 {
-    //                     ui.colored_label(
-    //                         egui::Color32::GREEN,
-    //                         format!("FPS: {:.1}", self.current_fps),
-    //                     );
-    //                 }
-    //             });
-    //         });
-    //     });
-    // }
+    /*fn show_fps_counter(&self, ctx: &Context) {
+         egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                     if self.current_fps > 0.0 {
+                         ui.colored_label(
+                             egui::Color32::GREEN,
+                             format!("FPS: {:.1}", self.current_fps),
+                         );
+                     }
+                 });
+             });
+         });
+     }*/
 
     fn process_selection_response(&mut self, json_response: serde_json::Value) {
         match json_response["status"].as_str() {

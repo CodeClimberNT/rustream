@@ -12,10 +12,11 @@ use crate::screen_capture::CapturedFrame;
 pub const PORT: u16 = 56123;
 
 pub struct Sender {
-    pub receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
+    receivers: Arc<RwLock<HashMap<SocketAddr, Arc<TcpStream>>>>,
     disconnected_peers: Arc<Mutex<Vec<SocketAddr>>>,
     frame_id: u32,
-    pub started_sending: bool,
+    started_sending: bool,
+    is_sending_frame: Arc<AtomicBool>,
 }
 
 impl Sender {
@@ -26,6 +27,7 @@ impl Sender {
             disconnected_peers: Arc::new(Mutex::new(Vec::new())),
             frame_id: 0,
             started_sending: false,
+            is_sending_frame: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -60,6 +62,7 @@ impl Sender {
         &mut self,
         frame: CapturedFrame,
         is_blank_screen: Arc<AtomicBool>,
+        is_annotation_open: Arc<AtomicBool>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let recv = self.receivers.clone();
 
@@ -83,6 +86,12 @@ impl Sender {
             return Ok(());
         }
 
+        // Return early if still sending previous frame while annotation is open, to avoid latency
+        if self.is_sending_frame.swap(true, Ordering::SeqCst) && is_annotation_open.load(Ordering::SeqCst) {
+            println!("Still sending previous frame: skipping current");
+            return Ok(());
+        }
+
         //let start = Instant::now();
         let encoded_frame = frame.encode_to_h265()?;
         //let encode_time = start.elapsed();
@@ -103,6 +112,7 @@ impl Sender {
             let stream1 = stream.clone();
             let peer_addr = *peer_addr;
             let is_blank_clone = is_blank_screen.clone();
+            let is_sending = self.is_sending_frame.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -169,6 +179,7 @@ impl Sender {
                         }
                     }
                 }
+                is_sending.store(false, Ordering::SeqCst);
             });
         }
         Ok(())
@@ -221,6 +232,7 @@ pub async fn start_streaming(
     frame: CapturedFrame,
     stop_notify: Arc<Notify>,
     is_blank_screen: Arc<AtomicBool>,
+    is_annotation_open: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sender = sender.lock().await;
 
@@ -230,7 +242,7 @@ pub async fn start_streaming(
         sender.listen_for_receivers(stop_notify).await;
     }
 
-    return match sender.send_data(frame, is_blank_screen).await {
+    return match sender.send_data(frame, is_blank_screen, is_annotation_open).await {
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     };
