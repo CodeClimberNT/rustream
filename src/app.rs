@@ -648,30 +648,33 @@ impl RustreamApp {
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
                     let selected_monitor = self.config.lock().unwrap().capture.selected_monitor;
                     let displays = DisplayInfo::all().unwrap_or_default();
-                    //info!("Displays: {:?}", displays);
-                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
-                        error!("Monitor not found: {}", selected_monitor);
-                        std::process::exit(1);
-                    });
 
-                    let mut child = Command::new(env::current_exe().unwrap())
-                        .arg("--overlay:annotation")
-                        .arg(display.x.to_string())
-                        .arg(display.y.to_string())
-                        .arg(display.width.to_string())
-                        .arg(display.height.to_string())
-                        .arg(display.scale_factor.to_string())
-                        .spawn()
-                        .expect("Failed to spawn annotation overlay process");
+                    match displays.get(selected_monitor) {
+                        Some(display) => {
+                            let mut child = Command::new(env::current_exe().unwrap())
+                                .arg("--overlay:annotation")
+                                .arg(display.x.to_string())
+                                .arg(display.y.to_string())
+                                .arg(display.width.to_string())
+                                .arg(display.height.to_string())
+                                .arg(display.scale_factor.to_string())
+                                .spawn()
+	             .expect("Failed to spawn annotation overlay process");
 
-                    self.is_annotation_open = Arc::new(AtomicBool::new(true));
+	             self.is_annotation_open = Arc::new(AtomicBool::new(true));
 
-                    let is_open = self.is_annotation_open.clone();
-                    thread::spawn(move || {
-                        let _ = child.wait();                   
-                        is_open.store(false, Ordering::SeqCst);                  
-                    });
-                }
+                                let is_open = self.is_annotation_open.clone();
+                                thread::spawn(move || {
+                                    let _ = child.wait();                   
+                                    is_open.store(false, Ordering::SeqCst);                  
+                                 });
+                        }
+                        None => {
+                            error!("Monitor not found: {}", selected_monitor);
+                        }
+                    }
+    }
+
 
                 if self.action_button(ui, "🖥 Display Settings", HotkeyAction::ToggleSettings) {
                     self.show_config = !self.show_config;
