@@ -659,9 +659,9 @@ impl RustreamApp {
                                 .arg(display.height.to_string())
                                 .arg(display.scale_factor.to_string())
                                 .spawn()
-	             .expect("Failed to spawn annotation overlay process");
+	                            .expect("Failed to spawn annotation overlay process");
 
-	             self.is_annotation_open = Arc::new(AtomicBool::new(true));
+	                            self.is_annotation_open = Arc::new(AtomicBool::new(true));
 
                                 let is_open = self.is_annotation_open.clone();
                                 thread::spawn(move || {
@@ -1111,7 +1111,7 @@ impl RustreamApp {
                         }
 
                         // Update FPS counter
-                        self.update_fps_counter();
+                        //self.update_fps_counter();
                     } else {
                         // Add a loading indicator while waiting for receiver initialization
                         if self.display_texture.is_none()

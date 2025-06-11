@@ -64,7 +64,6 @@ impl Sender {
         is_blank_screen: Arc<AtomicBool>,
         is_annotation_open: Arc<AtomicBool>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let recv = self.receivers.clone();
 
         let mut disconnected_peers = self.disconnected_peers.lock().await;
 
@@ -102,11 +101,8 @@ impl Sender {
         self.frame_id += 1;
         let fid = self.frame_id;
         println!("Frame id: {:?}", fid);
-        drop(receivers);
-
-        let recv = recv.read().await;
-
-        for (peer_addr, stream) in recv.iter() {
+        
+        for (peer_addr, stream) in receivers.iter() {
             let disc_peers = self.disconnected_peers.clone();
             let encoded_frame1 = encoded_frame.clone();
             let stream1 = stream.clone();
@@ -187,8 +183,7 @@ impl Sender {
 
     // Send end of stream message to all receivers
     pub async fn end_stream(&self) {
-        let receivers = self.receivers.clone();
-        let receivers = receivers.read().await;
+        let receivers = self.receivers.read().await;
 
         for (peer, stream) in receivers.iter() {
             let stream1 = stream.clone();

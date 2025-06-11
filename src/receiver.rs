@@ -46,7 +46,7 @@ impl Receiver {
             tokio::select! {
                 _ = stop_notify.notified() => {
                     println!("Received stop signal, exiting recv_data");
-                    break; // Gracefully exit when `notify_waiters()` is called
+                    break; // exit when `notify_waiters()` is called
                 }
                 result = self.socket.read_exact(&mut buf) => {  //read frame size or end message
                     match result {
@@ -156,7 +156,7 @@ pub async fn start_receiving(
         tokio::select! {
             _ = stop_notify.notified() => {
                 println!("Received stop signal, exiting start_receiving");
-                break; // Gracefully exit when `notify_waiters()` is called
+                break; // exit when notify_waiters() is called
             }
 
             Some(frame) = rx.recv() => {

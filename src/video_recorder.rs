@@ -23,7 +23,7 @@ pub struct VideoRecorder {
     start_time: Option<Instant>,
     last_frame_time: Option<Instant>,
     target_frame_duration: Duration,
-    frame_sender: Option<mpsc::Sender<(CapturedFrame, PathBuf)>>,
+    frame_tx: Option<mpsc::Sender<(CapturedFrame, PathBuf)>>,
 }
 
 impl Default for VideoRecorder {
@@ -46,7 +46,7 @@ impl VideoRecorder {
             frame_writer_handle: None,
             frame_counter: 0,
             recording_start_time: None,
-            frame_sender: None,
+            frame_tx: None,
             start_time: None,
             last_frame_time: None,
             target_frame_duration: Duration::from_secs_f64(1.0 / fps as f64),
@@ -80,11 +80,11 @@ impl VideoRecorder {
         };
 
         // Setup frame writer thread
-        let (sender, receiver) = mpsc::channel();
-        self.frame_sender = Some(sender);
+        let (tx, rx) = mpsc::channel();
+        self.frame_tx = Some(tx);
 
         let handle = thread::spawn(move || {
-            while let Ok((image_data, frame_path)) = receiver.recv() {
+            while let Ok((image_data, frame_path)) = rx.recv() {
                 match image_data.save(&frame_path) {
                     Ok(_) => (),
                     Err(e) => error!("Failed to save frame: {}", e),
@@ -127,7 +127,7 @@ impl VideoRecorder {
         self.frame_counter += 1;
 
         // Send frame to background thread through channel
-        if let Some(sender) = &self.frame_sender {
+        if let Some(sender) = &self.frame_tx {
             if let Err(e) = sender.send((frame.clone(), frame_path)) {
                 error!("Failed to send frame to writer thread: {}", e);
             }
@@ -144,7 +144,7 @@ impl VideoRecorder {
         self.is_recording.store(false, Ordering::SeqCst);
         self.is_finalizing.store(true, Ordering::SeqCst);
 
-        self.frame_sender.take();
+        self.frame_tx.take();
         info!("Recording stopped, waiting for pending frames...");
 
         // Get necessary data before spawning thread
