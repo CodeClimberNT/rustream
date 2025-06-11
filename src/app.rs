@@ -1111,7 +1111,7 @@ impl RustreamApp {
                         }
 
                         // Update FPS counter
-                        //self.update_fps_counter();
+                        self.update_fps_counter();
                     } else {
                         // Add a loading indicator while waiting for receiver initialization
                         if self.display_texture.is_none()
