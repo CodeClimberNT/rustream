@@ -34,3 +34,65 @@ multiple monitors independently, allowing users to cast content from any of the 
 displays. 
 
 
+## Installation
+To build rustream from source you will need a different setup based on the Operating System. a common dependency is, of course, having [rust installed](https://www.rust-lang.org/tools/install), but also ffmpeg invocable from the terminal as:  `ffmpeg`
+
+If the following do not return an error
+``` bash
+ffmpeg -version
+```
+
+Then your ffmpeg installation is good to go for this project!
+
+### Windows
+If you already have the basics installed (rust and ffmpeg) you're good to go!
+
+### Linux
+Using Ubuntu (debian based) as an example you will need to have a gcc linker and gui dependency to allow the different dependency of this project to work, if you have access to `apt` then you can easily run the following command
+
+``` bash
+sudo apt update
+sudo apt install -y \
+   ubuntu-restricted-extras \
+   build-essential \
+   libssl-dev \
+   pkg-config \
+   libx11-dev \
+   libxcb1-dev \
+   libxcb-render0-dev \
+   libxcb-shape0-dev \
+   libxcb-xfixes0-dev \
+   libxcb-randr0-dev \
+   libxcb-shm0-dev \
+   libgtk-3-dev \
+   libglib2.0-dev \
+   libpango1.0-dev \
+   libcairo2-dev \
+   libxkbcommon-x11-0 \
+   libxkbcommon-dev \
+   libxkbcommon-x11-dev \
+   libavcodec-extra\
+   xrandr\
+   ffmpeg \
+   libavcodec-dev \
+   libavformat-dev \
+   libavutil-dev \
+   libswscale-dev \
+   libx264-dev \
+   libx265-dev \
+   libvpx-dev\
+   vainfo \
+   libva-dev \
+   libvdpau-dev\
+```
+
+>[!Note]
+> some of those library may not be required, i had to use them for wsl
+
+>[!Warning]
+> Remember to check what people online make you install before modifying you system!
+
+If you are running a non-debian derived distro, probabily you know what you are doing and can easily compensate for the (possibly) missing dependency
+
+## MacOS
+**¯\\_(ツ)_/¯**

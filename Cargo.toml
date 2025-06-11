@@ -24,10 +24,13 @@
         # "serde",
         "wgpu",
         "x11",
+        # for clipboard support in wayland
+        "wayland",
         "glow",
     ], default-features = false }
 
     # Screen Capture and Image Processing
+    # Consider switching to https://github.com/CapSoftware/scap
     scrap = "0.5.0"
     image = { version = "0.25.5", features = [
         "serde",
