@@ -7,10 +7,9 @@ use crate::sender::{start_streaming, Sender, PORT};
 use crate::video_recorder::VideoRecorder;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-// use std::os::windows::thread; // Remove this line
-use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 use tokio::sync::oneshot::{channel, error::TryRecvError};
 use tokio::sync::Notify;
@@ -21,7 +20,7 @@ use egui::{
     TextureHandle, TopBottomPanel, Ui, Window,
 };
 
-use std::{env};
+use std::env;
 use std::process::Command;
 
 use display_info::DisplayInfo;
@@ -648,11 +647,14 @@ impl RustreamApp {
                 if self.action_button(ui, "🖊 Annotation", HotkeyAction::Annotation) {
                     let selected_monitor = self.config.lock().unwrap().capture.selected_monitor;
                     let displays = DisplayInfo::all().unwrap_or_default();
-                    //info!("Displays: {:?}", displays);
-                    let display = displays.get(selected_monitor).unwrap_or_else(|| {
-                        error!("Monitor not found: {}", selected_monitor);
-                        std::process::exit(1);
-                    });
+
+                    let display = match displays.get(selected_monitor) {
+                        Some(d) => d,
+                        None => {
+                            error!("Monitor not found: {}", selected_monitor);
+                            return;
+                        }
+                    };
 
                     let mut child = Command::new(env::current_exe().unwrap())
                         .arg("--overlay:annotation")
@@ -668,8 +670,8 @@ impl RustreamApp {
 
                     let is_open = self.is_annotation_open.clone();
                     thread::spawn(move || {
-                        let _ = child.wait();                   
-                        is_open.store(false, Ordering::SeqCst);                  
+                        let _ = child.wait();
+                        is_open.store(false, Ordering::SeqCst);
                     });
                 }
 
@@ -856,7 +858,7 @@ impl RustreamApp {
             self.video_recorder = Some(VideoRecorder::new(self.config.clone()));
         }
 
-         //self.show_fps_counter(ctx);
+        //self.show_fps_counter(ctx);
         // Render the recording settings window if it's open
         self.render_recording_settings(ctx);
 
@@ -1270,19 +1272,19 @@ impl RustreamApp {
     }
 
     /*fn show_fps_counter(&self, ctx: &Context) {
-         egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                     if self.current_fps > 0.0 {
-                         ui.colored_label(
-                             egui::Color32::GREEN,
-                             format!("FPS: {:.1}", self.current_fps),
-                         );
-                     }
-                 });
-             });
-         });
-     }*/
+        egui::TopBottomPanel::top("fps_counter").show(ctx, |ui| {
+           ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.current_fps > 0.0 {
+                        ui.colored_label(
+                            egui::Color32::GREEN,
+                            format!("FPS: {:.1}", self.current_fps),
+                        );
+                    }
+                });
+            });
+        });
+    }*/
 
     fn process_selection_response(&mut self, json_response: serde_json::Value) {
         match json_response["status"].as_str() {
